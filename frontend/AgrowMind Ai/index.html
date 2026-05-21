@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+  <!-- =========================================================
+       BASIC
+  ========================================================== -->
+
+  <meta charset="UTF-8" />
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+
+  <meta
+    http-equiv="X-UA-Compatible"
+    content="IE=edge"
+  />
+
+  <meta
+    name="theme-color"
+    content="#0f172a"
+  />
+
+  <!-- =========================================================
+       SEO
+  ========================================================== -->
+
+  <title>
+    AgroMind AI • Smart Crop Disease Detection
+  </title>
+
+  <meta
+    name="title"
+    content="AgroMind AI • Smart Crop Disease Detection"
+  />
+
+  <meta
+    name="description"
+    content="AgroMind AI is an advanced AI-powered crop disease detection platform using deep learning and computer vision to identify plant diseases instantly."
+  />
+
+  <meta
+    name="keywords"
+    content="AgroMind AI, crop disease detection, plant disease AI, agriculture AI, tomato disease detection, mango disease detection, coconut disease detection, smart farming, deep learning agriculture"
+  />
+
+  <meta
+    name="author"
+    content="Swarup Shivalkar"
+  />
+
+  <meta
+    name="robots"
+    content="index, follow"
+  />
+
+  <!-- =========================================================
+       OPEN GRAPH / SOCIAL SHARE
+  ========================================================== -->
+
+  <meta
+    property="og:type"
+    content="website"
+  />
+
+  <meta
+    property="og:title"
+    content="AgroMind AI"
+  />
+
+  <meta
+    property="og:description"
+    content="AI-powered crop disease detection using deep learning and computer vision."
+  />
+
+  <meta
+    property="og:image"
+    content="/preview.png"
+  />
+
+  <meta
+    property="og:url"
+    content="https://agrowmindai.vercel.app"
+  />
+
+  <meta
+    property="og:site_name"
+    content="AgroMind AI"
+  />
+
+  <!-- =========================================================
+       TWITTER
+  ========================================================== -->
+
+  <meta
+    name="twitter:card"
+    content="summary_large_image"
+  />
+
+  <meta
+    name="twitter:title"
+    content="AgroMind AI"
+  />
+
+  <meta
+    name="twitter:description"
+    content="AI-powered crop disease detection platform."
+  />
+
+  <meta
+    name="twitter:image"
+    content="/preview.png"
+  />
+
+  <!-- =========================================================
+       PWA
+  ========================================================== -->
+
+  <link
+    rel="manifest"
+    href="/manifest.json"
+  />
+
+  <meta
+    name="apple-mobile-web-app-capable"
+    content="yes"
+  />
+
+  <meta
+    name="apple-mobile-web-app-status-bar-style"
+    content="black-translucent"
+  />
+
+  <meta
+    name="apple-mobile-web-app-title"
+    content="AgroMind AI"
+  />
+
+  <!-- =========================================================
+       ICONS
+  ========================================================== -->
+
+  <link
+    rel="icon"
+    type="image/png"
+    href="/favicon.png"
+  />
+
+  <link
+    rel="apple-touch-icon"
+    href="/logo192.png"
+  />
+
+  <!-- =========================================================
+       GOOGLE FONTS
+  ========================================================== -->
+
+  <link
+    rel="preconnect"
+    href="https://fonts.googleapis.com"
+  />
+
+  <link
+    rel="preconnect"
+    href="https://fonts.gstatic.com"
+    crossorigin
+  />
+
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- =========================================================
+       PRELOADER STYLE
+  ========================================================== -->
+
+  <style>
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      min-height: 100%;
+      font-family: "Inter", sans-serif;
+      background: #020617;
+      color: white;
+      overflow-x: hidden;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #root {
+      width: 100%;
+      min-height: 100vh;
+    }
+
+    .initial-loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background:
+        radial-gradient(circle at top left,
+          rgba(34, 197, 94, 0.25),
+          transparent 30%),
+        radial-gradient(circle at bottom right,
+          rgba(59, 130, 246, 0.25),
+          transparent 30%),
+        #020617;
+      z-index: 9999;
+    }
+
+    .loader-ring {
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      border: 5px solid rgba(255,255,255,0.08);
+      border-top-color: #22c55e;
+      animation: spin 1s linear infinite;
+    }
+
+    .loader-text {
+      margin-top: 20px;
+      font-size: 1rem;
+      color: #cbd5e1;
+      letter-spacing: 0.05em;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+  </style>
+
+</head>
+
+<body>
+
+  <!-- =========================================================
+       REACT ROOT
+  ========================================================== -->
+
+  <div id="root">
+
+    <!-- INITIAL LOADER -->
+
+    <div class="initial-loader">
+
+      <div class="loader-ring"></div>
+
+      <div class="loader-text">
+        Loading AgroMind AI...
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- =========================================================
+       VITE ENTRY
+  ========================================================== -->
+
+  <script
+    type="module"
+    src="/src/main.jsx"
+  ></script>
+
+</body>
+
+</html>

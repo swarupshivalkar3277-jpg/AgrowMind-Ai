@@ -1,0 +1,92 @@
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# =========================
+# Dependencies
+# =========================
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# =========================
+# Build folders
+# =========================
+dist/
+dist-ssr/
+build/
+out/
+
+# =========================
+# Environment files
+# =========================
+.env
+.env.local
+.env.*.local
+*.local
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+venv/
+.venv/
+
+# =========================
+# AI / ML Models
+# =========================
+*.h5
+*.keras
+*.pth
+*.pt
+*.onnx
+*.ckpt
+*.pb
+
+# Ignore training model folder
+backend/training/
+
+# =========================
+# Dataset folders
+# =========================
+datasets/
+data/
+
+# =========================
+# Editor files
+# =========================
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# Virtual environments
+backend/tfenv/
+venv/
+.venv/
+
+# Uploads & results
+backend/uploads/
+backend/results/
+
+# Production env
+frontend/AgrowMind Ai/.env.production
+
+# Documents
+*.docx
+*.pub

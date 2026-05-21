@@ -1,0 +1,10 @@
+{
+  "name": "agromind-frontend-runner",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix \"AgrowMind Ai\" run dev",
+    "build": "npm --prefix \"AgrowMind Ai\" run build",
+    "preview": "npm --prefix \"AgrowMind Ai\" run preview",
+    "install:app": "npm --prefix \"AgrowMind Ai\" install"
+  }
+}
