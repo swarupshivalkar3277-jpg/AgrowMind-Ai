@@ -50,4 +50,74 @@ export function getHistory() {
   return api.get("/history");
 }
 
+export function getProducts(params = {}) {
+  return api.get("/marketplace/products", { params });
+}
+
+export function getProduct(productId) {
+  return api.get(`/marketplace/products/${productId}`);
+}
+
+export function createProduct(payload) {
+  return api.post("/marketplace/products", payload);
+}
+
+export function updateProduct(productId, payload) {
+  return api.put(`/marketplace/products/${productId}`, payload);
+}
+
+export function deleteProduct(productId) {
+  return api.delete(`/marketplace/products/${productId}`);
+}
+
+export function getSellerProducts() {
+  return api.get("/marketplace/seller/products");
+}
+
+export function getCart() {
+  return api.get("/marketplace/cart");
+}
+
+export function addCartItem(productId, quantity = 1) {
+  return api.post("/marketplace/cart/items", { product_id: productId, quantity });
+}
+
+export function updateCartItem(productId, quantity) {
+  return api.put(`/marketplace/cart/items/${productId}`, { product_id: productId, quantity });
+}
+
+export function removeCartItem(productId) {
+  return api.delete(`/marketplace/cart/items/${productId}`);
+}
+
+export function toggleWishlist(productId) {
+  return api.post(`/marketplace/wishlist/${productId}`);
+}
+
+export function getWishlist() {
+  return api.get("/marketplace/wishlist");
+}
+
+export function checkoutCart(payload) {
+  return api.post("/marketplace/checkout", payload);
+}
+
+export function getOrders() {
+  return api.get("/marketplace/orders");
+}
+
+export function cancelOrder(orderId) {
+  return api.delete(`/marketplace/orders/${orderId}`);
+}
+
+export function getAdminOrders() {
+  return api.get("/marketplace/admin/orders");
+}
+
+export function updateAdminOrderStatus(orderId, statusValue) {
+  return api.put(`/marketplace/admin/orders/${orderId}/status`, null, {
+    params: { status_value: statusValue },
+  });
+}
+
 export default api;

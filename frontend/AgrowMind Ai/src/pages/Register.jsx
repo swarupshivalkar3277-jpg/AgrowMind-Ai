@@ -89,6 +89,7 @@ export default function Register({ onHome, onSwitch }) {
           <select onChange={(event) => updateField("role", event.target.value)} value={form.role}>
             <option value="user">User</option>
             <option value="farmer">Farmer</option>
+            <option value="seller">Seller</option>
             <option value="buyer">Buyer</option>
             <option value="admin">Admin</option>
           </select>

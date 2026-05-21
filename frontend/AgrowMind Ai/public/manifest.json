@@ -1,0 +1,16 @@
+{
+  "name": "AgroMind AI",
+  "short_name": "AgroMind",
+  "description": "AI crop disease detection and agriculture marketplace.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5fbff",
+  "theme_color": "#166534",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

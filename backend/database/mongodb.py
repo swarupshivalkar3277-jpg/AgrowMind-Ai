@@ -8,17 +8,18 @@ from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import InvalidURI, PyMongoError
 
-# =========================
-# LOAD ENV
-# =========================
+# ==========================================
+# LOAD ENV VARIABLES
+# ==========================================
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 logger = logging.getLogger("agromind.database")
+logging.basicConfig(level=logging.INFO)
 
 
-# =========================
+# ==========================================
 # CUSTOM ERRORS
-# =========================
+# ==========================================
 class DatabaseConfigurationError(PyMongoError):
     pass
 
@@ -31,15 +32,15 @@ class UnconfiguredDatabase:
         raise DatabaseConfigurationError(self.reason)
 
 
-# =========================
+# ==========================================
 # NORMALIZE MONGO URL
-# =========================
+# ==========================================
 def normalize_mongo_url(raw_url: str | None) -> str:
 
     if not raw_url:
         raise RuntimeError(
-            "MONGO_URL is missing. Add your MongoDB Atlas connection string "
-            "to Render environment variables."
+            "MONGO_URL is missing. "
+            "Add MongoDB Atlas connection string."
         )
 
     url = raw_url.strip().strip("\"'")
@@ -48,31 +49,33 @@ def normalize_mongo_url(raw_url: str | None) -> str:
     # MONGO_URL=mongodb+srv://...
     if url.startswith("MONGO_URL="):
         logger.warning(
-            "MONGO_URL contains duplicated prefix. Normalizing automatically."
+            "Detected duplicated MONGO_URL prefix. Fixing automatically."
         )
         url = url.split("=", 1)[1].strip()
 
     if not url.startswith(("mongodb://", "mongodb+srv://")):
         raise RuntimeError(
-            "Invalid MONGO_URL format. "
-            "Must start with mongodb:// or mongodb+srv://"
+            "Invalid MongoDB URL format."
         )
 
     if "localhost" in url or "127.0.0.1" in url:
         raise RuntimeError(
-            "Render cannot use localhost MongoDB. Use MongoDB Atlas."
+            "Render cannot connect to localhost MongoDB. "
+            "Use MongoDB Atlas."
         )
 
     return url
 
 
-# =========================
+# ==========================================
 # DATABASE CONFIG
-# =========================
+# ==========================================
 MONGO_URL = normalize_mongo_url(os.getenv("MONGO_URL"))
 
-# Your real MongoDB database name
-DB_NAME = os.getenv("MONGO_DB_NAME", "agrowmindai")
+DB_NAME = os.getenv(
+    "MONGO_DB_NAME",
+    "agrowmindai"
+)
 
 SERVER_SELECTION_TIMEOUT_MS = int(
     os.getenv("MONGO_TIMEOUT_MS", "5000")
@@ -88,25 +91,25 @@ DNS_NAMESERVERS = [
 ]
 
 
-# =========================
-# CUSTOM DNS
-# =========================
+# ==========================================
+# CUSTOM DNS RESOLVER
+# ==========================================
 if DNS_NAMESERVERS:
     resolver = dns.resolver.Resolver(configure=False)
     resolver.nameservers = DNS_NAMESERVERS
     dns.resolver.default_resolver = resolver
 
 
-# =========================
-# CONNECT DATABASE
-# =========================
+# ==========================================
+# CONNECT TO DATABASE
+# ==========================================
 try:
 
     client_options = {
         "serverSelectionTimeoutMS": SERVER_SELECTION_TIMEOUT_MS,
     }
 
-    # Atlas TLS
+    # Enable TLS for Atlas
     if MONGO_URL.startswith("mongodb+srv://"):
         client_options.update({
             "tls": True,
@@ -115,13 +118,13 @@ try:
 
     client = AsyncIOMotorClient(
         MONGO_URL,
-        **client_options,
+        **client_options
     )
 
     db = client[DB_NAME]
 
     logger.info(
-        "MongoDB client configured for database '%s'.",
+        "MongoDB connected successfully to database '%s'",
         DB_NAME
     )
 
@@ -129,7 +132,7 @@ except InvalidURI:
 
     reason = (
         "Invalid MongoDB URI. "
-        "URL-encode special characters in username/password."
+        "Check username/password special characters."
     )
 
     logger.exception(reason)
@@ -142,7 +145,7 @@ except RuntimeError as exc:
     reason = str(exc)
 
     logger.warning(
-        "MongoDB is not configured: %s",
+        "MongoDB configuration error: %s",
         reason
     )
 
@@ -150,33 +153,107 @@ except RuntimeError as exc:
     db = UnconfiguredDatabase(reason)
 
 
-# =========================
-# CHECK DATABASE
-# =========================
+# ==========================================
+# CHECK DATABASE CONNECTION
+# ==========================================
 async def check_database() -> None:
 
     if client is None:
         raise DatabaseConfigurationError(
-            "Database is not configured. "
-            "Add MONGO_URL to Render environment variables."
+            "Database is not configured properly."
         )
 
     await client.admin.command("ping")
 
+    logger.info("MongoDB ping successful")
 
-# =========================
-# CREATE INDEXES
-# =========================
+
+# ==========================================
+# CREATE DATABASE INDEXES
+# ==========================================
 async def ensure_indexes() -> None:
 
     await check_database()
+    await drop_parallel_array_product_indexes()
 
+    # ======================================
+    # USERS
+    # ======================================
     await db.users.create_index(
         "email",
         unique=True
     )
 
+    # ======================================
+    # PREDICTION HISTORY
+    # ======================================
     await db.prediction_history.create_index([
         ("user_id", 1),
         ("created_at", -1)
     ])
+
+    # ======================================
+    # PRODUCTS
+    # IMPORTANT:
+    # Separate indexes for array fields
+    # ======================================
+    await db.products.create_index("category")
+    await db.products.create_index("crop_type")
+    await db.products.create_index("disease_tags")
+    await db.products.create_index("name")
+
+    # ======================================
+    # CARTS
+    # ======================================
+    await db.carts.create_index(
+        "user_id",
+        unique=True
+    )
+
+    # ======================================
+    # ORDERS
+    # ======================================
+    await db.orders.create_index([
+        ("user_id", 1),
+        ("created_at", -1)
+    ])
+
+    # ======================================
+    # PAYMENTS
+    # ======================================
+    await db.payments.create_index([
+        ("user_id", 1),
+        ("created_at", -1)
+    ])
+
+    # ======================================
+    # WISHLIST
+    # ======================================
+    await db.wishlist.create_index([
+        ("user_id", 1),
+        ("product_id", 1)
+    ], unique=True)
+
+    # ======================================
+    # RECOMMENDATIONS
+    # ======================================
+    await db.recommendations.create_index([
+        ("crop", 1),
+        ("disease", 1)
+    ], unique=True)
+
+    logger.info("All MongoDB indexes created successfully")
+
+
+async def drop_parallel_array_product_indexes() -> None:
+    """Remove old product indexes that combined crop_type and disease_tags arrays."""
+    try:
+        indexes = await db.products.index_information()
+    except PyMongoError:
+        return
+
+    for index_name, index in indexes.items():
+        keys = [key for key, _direction in index.get("key", [])]
+        if "crop_type" in keys and "disease_tags" in keys:
+            logger.warning("Dropping invalid parallel-array product index: %s", index_name)
+            await db.products.drop_index(index_name)

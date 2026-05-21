@@ -94,6 +94,43 @@ export default function PredictionCards({ crop, prediction, onDownload }) {
           <TagList items={prediction.prevention} />
         </InfoCard>
       </div>
+
+      <section className="recommendedProducts">
+        <div className="sectionHeader">
+          <div>
+            <h3>Buy Recommended Products</h3>
+            <span>Matched to {crop} and {formatDiseaseName(prediction.disease)}</span>
+          </div>
+          <Link
+            className="secondaryButton"
+            to={`/marketplace?crop=${crop}&disease=${prediction.disease}`}
+          >
+            View Marketplace
+          </Link>
+        </div>
+        <div className="quickBuyLinks">
+          <Link to={`/marketplace?crop=${crop}&disease=${prediction.disease}&category=fertilizers`}>
+            Buy Fertilizer
+          </Link>
+          <Link to={`/marketplace?crop=${crop}&disease=${prediction.disease}&category=pesticides`}>
+            Buy Treatment
+          </Link>
+          <Link to={`/marketplace?crop=${crop}&category=trees`}>
+            View Tree Marketplace
+          </Link>
+        </div>
+        <div className="miniProductGrid">
+          {(prediction.marketplace_products || []).slice(0, 3).map((product) => (
+            <Link className="miniProduct" key={product.id} to={`/marketplace/product/${product.id}`}>
+              <img alt={product.name} src={product.image} />
+              <span>{product.category}</span>
+              <strong>{product.name}</strong>
+              <small>₹{product.price} - ★ {product.rating}</small>
+            </Link>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
+import { Link } from "react-router-dom";

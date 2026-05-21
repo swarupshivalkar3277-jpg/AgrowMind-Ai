@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext";
 import PredictionCards, { SeverityBadge } from "../components/PredictionCards";
@@ -140,6 +141,14 @@ export default function Dashboard({ onHome }) {
           <span>{user?.name} - {user?.role}</span>
         </div>
         <div className="topbarActions">
+          <Link className="secondaryButton" to="/marketplace">
+            Marketplace
+          </Link>
+          {(user?.role === "farmer" || user?.role === "seller" || user?.role === "admin") && (
+            <Link className="secondaryButton" to="/sell">
+              Sell Products
+            </Link>
+          )}
           <button className="secondaryButton" onClick={onHome} type="button">
             Home
           </button>

@@ -24,6 +24,7 @@ from pymongo.errors import PyMongoError
 from auth.routes import router as auth_router
 from auth.deps import get_current_user
 from auth.models import user_public
+from routes.marketplace import router as marketplace_router, recommended_products
 
 # =========================
 # AI MODULES
@@ -98,6 +99,7 @@ app.add_middleware(
 # ROUTERS
 # =========================
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
+app.include_router(marketplace_router)
 
 
 @app.options("/{full_path:path}", include_in_schema=False)
@@ -274,6 +276,8 @@ async def predict_crop(
             )
 
         result = enrich_prediction(crop, result)
+        market_products = await recommended_products(crop, result.get("disease", ""), limit=6)
+        result["marketplace_products"] = market_products
 
         await db.prediction_history.insert_one({
             "user_id": str(user["_id"]),
@@ -294,6 +298,7 @@ async def predict_crop(
             "prevention": result.get("prevention", []),
             "organic_solution": result.get("organic_solution", []),
             "harvest_risk": result.get("harvest_risk"),
+            "marketplace_products": market_products,
             "user": user["email"]
         }
 

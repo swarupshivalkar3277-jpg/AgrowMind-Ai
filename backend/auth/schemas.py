@@ -5,7 +5,7 @@ class UserRegister(BaseModel):
     name: str = Field(..., min_length=2, max_length=80)
     email: EmailStr
     password: str = Field(..., min_length=6, max_length=128)
-    role: str = Field(default="user", pattern="^(user|admin|farmer|buyer)$")
+    role: str = Field(default="user", pattern="^(user|admin|farmer|buyer|seller)$")
 
 
 class UserLogin(BaseModel):
