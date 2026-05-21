@@ -289,6 +289,11 @@ async def predict_crop(
 
     except HTTPException:
         raise
+    except PyMongoError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Database is not reachable. Check the backend MONGO_URL and MongoDB network access: {str(e)}"
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,
