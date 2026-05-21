@@ -62,6 +62,8 @@ backend/training/
 # =========================
 datasets/
 data/
+!backend/data/
+!backend/data/recommendations.json
 
 # =========================
 # Editor files

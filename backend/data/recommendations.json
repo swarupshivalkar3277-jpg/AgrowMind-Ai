@@ -1,0 +1,98 @@
+{
+  "tomato": {
+    "early_blight": {
+      "severity": "Medium",
+      "fertilizer": ["NPK 19:19:19", "Organic compost", "Calcium nitrate"],
+      "treatment": ["Copper fungicide", "Chlorothalonil spray", "Remove infected foliage"],
+      "irrigation": "Avoid overwatering. Irrigate at soil level in the morning and keep leaves dry.",
+      "prevention": ["Remove infected leaves", "Maintain proper spacing", "Rotate with non-solanaceous crops"],
+      "organic_solution": ["Neem oil spray", "Trichoderma-enriched compost", "Compost tea"],
+      "harvest_risk": "Moderate"
+    },
+    "late_blight": {
+      "severity": "High",
+      "fertilizer": ["Balanced NPK", "Potassium-rich fertilizer", "Well-decomposed compost"],
+      "treatment": ["Copper fungicide", "Mancozeb-based fungicide", "Destroy heavily infected plants"],
+      "irrigation": "Reduce leaf wetness. Use drip irrigation and avoid evening watering.",
+      "prevention": ["Improve airflow", "Scout after humid weather", "Remove volunteer tomato plants"],
+      "organic_solution": ["Copper soap", "Bacillus subtilis biofungicide", "Neem oil as support spray"],
+      "harvest_risk": "High"
+    },
+    "healthy": {
+      "severity": "Low",
+      "fertilizer": ["Organic compost", "Balanced NPK", "Seaweed extract"],
+      "treatment": ["No pesticide required", "Continue regular monitoring"],
+      "irrigation": "Maintain consistent soil moisture. Water in the morning when the top soil begins to dry.",
+      "prevention": ["Keep field weed-free", "Use clean tools", "Inspect leaves weekly"],
+      "organic_solution": ["Vermicompost", "Mulching", "Beneficial microbial inoculants"],
+      "harvest_risk": "Low"
+    }
+  },
+  "mango": {
+    "anthracnose": {
+      "severity": "High",
+      "fertilizer": ["Potassium sulphate", "Organic compost", "Micronutrient mix with zinc and boron"],
+      "treatment": ["Copper oxychloride spray", "Remove infected twigs and panicles", "Apply recommended fungicide before flowering"],
+      "irrigation": "Avoid overhead irrigation. Keep canopy dry and irrigate deeply but less frequently.",
+      "prevention": ["Prune for airflow", "Remove fallen infected leaves", "Avoid dense canopy growth"],
+      "organic_solution": ["Neem oil", "Bacillus subtilis biofungicide", "Compost mulch"],
+      "harvest_risk": "High"
+    },
+    "powdery_mildew": {
+      "severity": "Medium",
+      "fertilizer": ["Balanced NPK", "Organic compost", "Potash fertilizer"],
+      "treatment": ["Wettable sulphur", "Potassium bicarbonate spray", "Prune infected shoots"],
+      "irrigation": "Avoid water stress during flowering. Water at the root zone and avoid wetting flowers.",
+      "prevention": ["Maintain open canopy", "Monitor during cool dry weather", "Remove infected flowers"],
+      "organic_solution": ["Neem oil", "Sulphur dusting as allowed locally", "Cow milk dilution spray"],
+      "harvest_risk": "Moderate"
+    },
+    "healthy": {
+      "severity": "Low",
+      "fertilizer": ["Farmyard manure", "Balanced NPK", "Micronutrient foliar spray"],
+      "treatment": ["No pesticide required", "Continue preventive scouting"],
+      "irrigation": "Irrigate based on soil moisture and tree age. Avoid waterlogging around the root zone.",
+      "prevention": ["Prune dead branches", "Keep orchard floor clean", "Use sanitation after harvest"],
+      "organic_solution": ["Compost", "Neem cake", "Mulching"],
+      "harvest_risk": "Low"
+    }
+  },
+  "coconut": {
+    "bud_rot": {
+      "severity": "High",
+      "fertilizer": ["Balanced palm fertilizer", "Organic manure", "Potassium chloride"],
+      "treatment": ["Remove rotten tissues", "Apply copper fungicide to crown", "Improve drainage around palm"],
+      "irrigation": "Prevent water stagnation. Irrigate only when needed and keep crown area dry.",
+      "prevention": ["Improve field drainage", "Inspect crown after heavy rain", "Remove severely affected palms"],
+      "organic_solution": ["Trichoderma compost", "Neem cake", "Bordeaux mixture where locally recommended"],
+      "harvest_risk": "High"
+    },
+    "leaf_rot": {
+      "severity": "Medium",
+      "fertilizer": ["Magnesium sulphate", "Balanced palm fertilizer", "Composted farmyard manure"],
+      "treatment": ["Remove damaged leaflets", "Apply copper fungicide", "Improve canopy sanitation"],
+      "irrigation": "Use controlled basin irrigation. Avoid prolonged moisture around the palm base.",
+      "prevention": ["Remove infected debris", "Avoid overcrowding", "Monitor young palms regularly"],
+      "organic_solution": ["Neem oil", "Trichoderma", "Compost mulch"],
+      "harvest_risk": "Moderate"
+    },
+    "healthy": {
+      "severity": "Low",
+      "fertilizer": ["Organic manure", "Balanced palm fertilizer", "Neem cake"],
+      "treatment": ["No pesticide required", "Maintain regular crown inspection"],
+      "irrigation": "Water deeply during dry periods and maintain mulch to conserve moisture.",
+      "prevention": ["Keep basin clean", "Maintain drainage", "Inspect spear leaves monthly"],
+      "organic_solution": ["Vermicompost", "Coconut husk mulch", "Biofertilizer"],
+      "harvest_risk": "Low"
+    }
+  },
+  "default": {
+    "severity": "Medium",
+    "fertilizer": ["Balanced NPK", "Organic compost"],
+    "treatment": ["Consult a local agricultural extension expert", "Isolate severely infected plant material"],
+    "irrigation": "Keep soil moisture consistent and avoid wetting leaves unnecessarily.",
+    "prevention": ["Monitor crop weekly", "Remove infected plant debris", "Maintain proper spacing"],
+    "organic_solution": ["Neem oil", "Trichoderma", "Compost"],
+    "harvest_risk": "Moderate"
+  }
+}

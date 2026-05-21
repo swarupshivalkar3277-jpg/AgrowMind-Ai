@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 
 import { useAuth } from "../context/AuthContext";
+import PredictionCards, { SeverityBadge } from "../components/PredictionCards";
 import api, { API_BASE, getHistory } from "../services/authService";
+import { downloadPredictionReport } from "../utils/reportPdf";
 
 const crops = [
   { value: "tomato", label: "Tomato" },
@@ -40,6 +42,7 @@ export default function Dashboard({ onHome }) {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [historyFilter, setHistoryFilter] = useState("");
 
   useEffect(() => {
     refreshHistory();
@@ -102,7 +105,7 @@ export default function Dashboard({ onHome }) {
       const { data } = await api.post(`/predict/${crop}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      setResult(data);
+      setResult({ ...data, created_at: new Date().toISOString() });
       await refreshHistory();
     } catch (err) {
       setError(normalizeError(err));
@@ -110,6 +113,23 @@ export default function Dashboard({ onHome }) {
       setLoading(false);
     }
   }
+
+  const filteredHistory = history.filter((item) => {
+    const query = historyFilter.trim().toLowerCase();
+
+    if (!query) {
+      return true;
+    }
+
+    return [
+      item.crop,
+      item.prediction?.disease,
+      item.prediction?.severity,
+      item.prediction?.harvest_risk,
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(query));
+  });
 
   return (
     <main className="dashboard">
@@ -154,21 +174,25 @@ export default function Dashboard({ onHome }) {
         </form>
 
         <section className="panel resultPanel">
-          {result ? (
-            <>
-              <p className="eyebrow">AI Prediction</p>
-              <h2>{formatDiseaseName(result.prediction?.disease)}</h2>
-              <div className="metricGrid">
-                <article>
-                  <span>Confidence</span>
-                  <strong>{result.prediction?.confidence}%</strong>
-                </article>
-                <article>
-                  <span>Crop</span>
-                  <strong>{result.crop}</strong>
-                </article>
-              </div>
-            </>
+          {loading ? (
+            <div className="analysisLoader">
+              <span />
+              <strong>Analyzing crop health...</strong>
+              <p>Running disease detection and preparing farming advice.</p>
+            </div>
+          ) : result ? (
+            <PredictionCards
+              crop={result.crop}
+              onDownload={() =>
+                downloadPredictionReport({
+                  user,
+                  crop: result.crop,
+                  prediction: result.prediction,
+                  createdAt: result.created_at,
+                })
+              }
+              prediction={result.prediction}
+            />
           ) : (
             <div className="emptyState">
               <h2>Ready for analysis</h2>
@@ -180,20 +204,33 @@ export default function Dashboard({ onHome }) {
 
       <section className="panel history">
         <div className="sectionHeader">
-          <h2>Prediction History</h2>
-          <span>{history.length} saved</span>
+          <div>
+            <h2>Prediction History</h2>
+            <span>{filteredHistory.length} of {history.length} saved</span>
+          </div>
+          <label className="historySearch">
+            <span>Search history</span>
+            <input
+              onChange={(event) => setHistoryFilter(event.target.value)}
+              placeholder="Filter by crop, disease, severity"
+              type="search"
+              value={historyFilter}
+            />
+          </label>
         </div>
         <div className="historyList">
-          {history.map((item) => (
+          {filteredHistory.map((item) => (
             <article key={item.id}>
               <div>
                 <strong>{formatDiseaseName(item.prediction?.disease)}</strong>
-                <span>{item.crop}</span>
+                <span>{item.crop} - {item.prediction?.confidence}% confidence</span>
               </div>
+              <SeverityBadge value={item.prediction?.severity} />
               <small>{new Date(item.created_at).toLocaleString()}</small>
             </article>
           ))}
           {history.length === 0 && <p>No predictions yet.</p>}
+          {history.length > 0 && filteredHistory.length === 0 && <p>No matching predictions.</p>}
         </div>
       </section>
     </main>

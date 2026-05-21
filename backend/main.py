@@ -35,6 +35,7 @@ from ai.predict import (
     model_status,
     ensure_configured_models,
 )
+from ai.recommendations import enrich_prediction
 
 # =========================
 # DATABASE
@@ -272,6 +273,8 @@ async def predict_crop(
                 detail=result
             )
 
+        result = enrich_prediction(crop, result)
+
         await db.prediction_history.insert_one({
             "user_id": str(user["_id"]),
             "email": user["email"],
@@ -284,6 +287,13 @@ async def predict_crop(
             "success": True,
             "crop": crop,
             "prediction": result,
+            "severity": result.get("severity"),
+            "fertilizer": result.get("fertilizer", []),
+            "treatment": result.get("treatment", []),
+            "irrigation": result.get("irrigation", ""),
+            "prevention": result.get("prevention", []),
+            "organic_solution": result.get("organic_solution", []),
+            "harvest_risk": result.get("harvest_risk"),
             "user": user["email"]
         }
 
