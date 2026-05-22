@@ -79,17 +79,13 @@ async def startup_event():
     except Exception as e:
         logger.exception("Model startup warning: %s", str(e))
 
+
 @app.options("/{full_path:path}", include_in_schema=False)
 async def preflight_handler(full_path: str):
     return JSONResponse(
         status_code=200,
         content={"ok": True}
     )
-
-
-# =========================
-# CORS
-# =========================
 
 # =========================
 # CORS
@@ -111,15 +107,15 @@ DEFAULT_ORIGINS = [
     # Localhost
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+
+    # LAN testing
+    "http://10.84.46.30:5173",
+
+    # Optional extra ports
     "http://localhost:5175",
     "http://127.0.0.1:5175",
-
-    # React/Vite LAN access
-    "http://0.0.0.0:5173",
-    "http://0.0.0.0:5175",
+    "http://10.84.46.30:5175",
 ]
-
-
 ALLOWED_ORIGINS = sorted(set(
     DEFAULT_ORIGINS
     + _csv_env("CORS_ORIGINS")
@@ -132,13 +128,8 @@ logger.info("Allowed CORS origins: %s", ALLOWED_ORIGINS)
 
 app.add_middleware(
     CORSMiddleware,
-
-    # IMPORTANT
     allow_origins=ALLOWED_ORIGINS,
-
-    # NEVER use "*" with credentials=True
     allow_credentials=True,
-
     allow_methods=[
         "GET",
         "POST",
@@ -147,11 +138,11 @@ app.add_middleware(
         "OPTIONS",
         "PATCH",
     ],
-
     allow_headers=["*"],
-
     expose_headers=["*"],
 )
+
+
 
 # =========================
 # ROUTERS
@@ -160,9 +151,7 @@ app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(marketplace_router)
 
 
-@app.options("/{full_path:path}", include_in_schema=False)
-async def preflight_handler(full_path: str):
-    return JSONResponse(status_code=200, content={"ok": True})
+
 
 # =========================
 # PATHS
