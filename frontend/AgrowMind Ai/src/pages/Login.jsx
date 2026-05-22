@@ -1,15 +1,23 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
+import toast from "react-hot-toast";
 
 import { useAuth } from "../context/AuthContext";
+import GoogleAuthButton from "../components/GoogleAuthButton";
+import { forgotPassword, sendOtp } from "../services/authService";
 
 function normalizeError(error) {
   return error?.response?.data?.detail || error?.message || "Login failed";
 }
 
-export default function Login({ onHome, onSwitch }) {
+export default function Login({ onHome, onSwitch, startForgot = false }) {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [forgotMode, setForgotMode] = useState(startForgot);
+  const [newPassword, setNewPassword] = useState("");
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -19,7 +27,16 @@ export default function Login({ onHome, onSwitch }) {
     setSubmitting(true);
 
     try {
-      await login(email, password);
+      if (forgotMode) {
+        await forgotPassword({ email, otp_code: otpCode, new_password: newPassword });
+        setMessage("Password reset. You can login now.");
+        toast.success("Password reset. You can login now.");
+        setForgotMode(false);
+        return;
+      }
+
+      await login(email, password, otpCode);
+      toast.success("Welcome back");
     } catch (err) {
       setError(normalizeError(err));
     } finally {
@@ -27,13 +44,22 @@ export default function Login({ onHome, onSwitch }) {
     }
   }
 
+  async function handleSendOtp(purpose = "login") {
+    setError("");
+    setMessage("");
+    try {
+      await sendOtp({ email, purpose });
+      setMessage("OTP sent to your email.");
+    } catch (err) {
+      setError(normalizeError(err));
+    }
+  }
+
   return (
     <section className="authPanel">
-      <button className="backButton" onClick={onHome} type="button">
-        Back to home
-      </button>
-      <p className="eyebrow">Welcome Back</p>
-      <h1>AgroMind AI</h1>
+      {!startForgot && <button className="backButton" onClick={onHome} type="button">Back to home</button>}
+      <p className="eyebrow">{forgotMode ? "Reset Password" : "Welcome Back"}</p>
+      <h1>{forgotMode ? "Forgot Password" : "AgroMind AI"}</h1>
       <form className="authForm" onSubmit={handleSubmit}>
         <label>
           <span>Email</span>
@@ -45,24 +71,59 @@ export default function Login({ onHome, onSwitch }) {
             value={email}
           />
         </label>
-        <label>
-          <span>Password</span>
-          <input
-            autoComplete="current-password"
-            onChange={(event) => setPassword(event.target.value)}
-            required
-            type="password"
-            value={password}
-          />
-        </label>
+        {!forgotMode && (
+          <label>
+            <span>Password</span>
+            <input
+              autoComplete="current-password"
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              type="password"
+              value={password}
+            />
+          </label>
+        )}
+        {forgotMode && (
+          <label>
+            <span>New Password</span>
+            <input
+              autoComplete="new-password"
+              minLength="6"
+              onChange={(event) => setNewPassword(event.target.value)}
+              required
+              type="password"
+              value={newPassword}
+            />
+          </label>
+        )}
+        <div className="otpRow">
+          <label>
+            <span>Email OTP</span>
+            <input
+              onChange={(event) => setOtpCode(event.target.value)}
+              placeholder="6 digit OTP"
+              required
+              value={otpCode}
+            />
+          </label>
+          <button className="secondaryButton" disabled={!email} onClick={() => handleSendOtp(forgotMode ? "forgot_password" : "login")} type="button">
+            Send OTP
+          </button>
+        </div>
+        {message && <div className="successAlert">{message}</div>}
         {error && <div className="alert">{error}</div>}
         <button disabled={submitting} type="submit">
-          {submitting ? "Signing in..." : "Login"}
+          {submitting ? "Please wait..." : forgotMode ? "Reset Password" : "Login"}
         </button>
       </form>
+      <button className="textButton" onClick={() => { setForgotMode((current) => !current); setError(""); setMessage(""); }} type="button">
+        {forgotMode ? "Back to login" : "Forgot password"}
+      </button>
+      {!forgotMode && <Link className="textButton" to="/forgot-password">Reset with OTP</Link>}
       <button className="textButton" onClick={onSwitch} type="button">
         Create an account
       </button>
+      {!forgotMode && <GoogleAuthButton />}
     </section>
   );
 }

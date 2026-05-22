@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { Search, SlidersHorizontal } from "lucide-react";
 
+import MarketplaceCarousel from "../components/MarketplaceCarousel";
 import ProductCard from "../components/ProductCard";
 import { getProducts } from "../services/authService";
 
-const categories = ["fertilizers", "pesticides", "seeds", "trees", "organic"];
+const categories = ["fertilizers", "seeds", "trees", "pesticides", "tools"];
 const crops = ["tomato", "mango", "coconut"];
 
 export default function Marketplace() {
@@ -22,50 +24,32 @@ export default function Marketplace() {
     let ignore = false;
     setLoading(true);
     getProducts(query)
-      .then(({ data }) => {
-        if (!ignore) {
-          setProducts(data.items || []);
-        }
-      })
-      .catch(() => {
-        if (!ignore) {
-          setProducts([]);
-        }
-      })
-      .finally(() => {
-        if (!ignore) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      ignore = true;
-    };
+      .then(({ data }) => !ignore && setProducts(data.items || []))
+      .catch(() => !ignore && setProducts([]))
+      .finally(() => !ignore && setLoading(false));
+    return () => { ignore = true; };
   }, [query]);
 
   function updateFilter(key, value) {
     const next = new URLSearchParams(params);
-    if (value) {
-      next.set(key, value);
-    } else {
-      next.delete(key);
-    }
+    if (value) next.set(key, value);
+    else next.delete(key);
     setParams(next);
   }
 
   return (
-    <main className="marketPage">
+    <main className="pageStack">
       <section className="marketHero">
         <div>
-          <p className="eyebrow">AgroMind Marketplace</p>
-          <h1>Inputs, saplings, and treatments matched to crop health.</h1>
-          <p>Shop fertilizers, pesticides, seeds, trees, and organic solutions connected to AI predictions.</p>
+          <span className="eyebrowText">AgroMind Marketplace</span>
+          <h1>Farm inputs matched to crop intelligence.</h1>
+          <p>Shop fertilizers, pesticides, seeds, saplings, and tools with AI-led recommendations.</p>
         </div>
         <Link className="primaryButton" to="/cart">Go to Cart</Link>
       </section>
-
+      <MarketplaceCarousel />
       <section className="marketFilters panel">
-        <input onChange={(event) => setSearch(event.target.value)} placeholder="Search products" value={search} />
+        <label className="searchInput"><Search size={18} /><input onChange={(event) => setSearch(event.target.value)} placeholder="Search products" value={search} /></label>
         <select onChange={(event) => updateFilter("category", event.target.value)} value={category}>
           <option value="">All categories</option>
           {categories.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -74,18 +58,14 @@ export default function Marketplace() {
           <option value="">All crops</option>
           {crops.map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
-        {(disease || category || crop || search) && (
-          <button className="secondaryButton" onClick={() => { setSearch(""); setParams({}); }} type="button">Clear</button>
-        )}
+        {(disease || category || crop || search) && <button className="secondaryButton" onClick={() => { setSearch(""); setParams({}); }} type="button"><SlidersHorizontal size={17} /> Clear</button>}
       </section>
-
       {disease && <p className="recommendationNote">Showing products related to {disease.replaceAll("_", " ")}.</p>}
-
       <section className="productGrid">
-        {loading && Array.from({ length: 6 }).map((_, index) => <div className="productSkeleton" key={index} />)}
+        {loading && Array.from({ length: 8 }).map((_, index) => <div className="productSkeleton" key={index} />)}
         {!loading && products.map((product) => <ProductCard key={product.id} product={product} />)}
       </section>
-      {!loading && products.length === 0 && <div className="panel emptyMarket">No products found.</div>}
+      {!loading && products.length === 0 && <div className="emptyMarket">No products found.</div>}
     </main>
   );
 }

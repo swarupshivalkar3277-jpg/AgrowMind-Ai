@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import OrderCard from "../components/OrderCard";
 import { cancelOrder, getOrders } from "../services/authService";
 import { downloadPredictionReport } from "../utils/reportPdf";
 
@@ -21,36 +22,23 @@ export default function Orders() {
   }
 
   return (
-    <main className="marketPage">
+    <main className="pageStack">
       <section className="panel">
         <div className="sectionHeader">
-          <h1>My Orders</h1>
+          <div>
+            <span className="eyebrowText">Orders</span>
+            <h1>My Orders</h1>
+          </div>
           <span>{orders.length} orders</span>
         </div>
         <div className="orderList">
           {orders.map((order) => (
-            <article className="orderCard" key={order.id}>
-              <div>
-                <strong>Order #{order.id.slice(-8)}</strong>
-                <span>{new Date(order.created_at).toLocaleString()}</span>
-                <span>Status: {order.order_status}</span>
-                <span>Payment: {order.payment_status}</span>
-              </div>
-              <div>
-                {order.items.map((item) => <span key={item.product.id}>{item.product.name} x {item.quantity}</span>)}
-              </div>
-              <strong>₹{order.total}</strong>
-              <div className="heroActions">
-                <button className="secondaryButton" onClick={() => handleCancel(order.id)} type="button">Cancel</button>
-                <button
-                  className="secondaryButton"
-                  onClick={() => downloadPredictionReport({ user: { name: order.address.full_name }, crop: "Marketplace", prediction: { disease: `Invoice ${order.id}`, confidence: order.total, fertilizer: [], treatment: [], irrigation: `Transaction: ${order.transaction_id}` } })}
-                  type="button"
-                >
-                  Invoice
-                </button>
-              </div>
-            </article>
+            <OrderCard
+              key={order.id}
+              onCancel={handleCancel}
+              onInvoice={() => downloadPredictionReport({ user: { name: order.address.full_name }, crop: "Marketplace", prediction: { disease: `Invoice ${order.id}`, confidence: order.total, fertilizer: [], treatment: [], irrigation: `Transaction: ${order.transaction_id}` } })}
+              order={order}
+            />
           ))}
           {orders.length === 0 && <p>No orders yet.</p>}
         </div>

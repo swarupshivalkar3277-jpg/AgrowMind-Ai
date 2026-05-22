@@ -1,6 +1,9 @@
 import { useState } from "react";
+import toast from "react-hot-toast";
 
 import { useAuth } from "../context/AuthContext";
+import GoogleAuthButton from "../components/GoogleAuthButton";
+import { sendOtp } from "../services/authService";
 
 function normalizeError(error) {
   const detail = error?.response?.data?.detail || error?.response?.data?.error;
@@ -23,12 +26,25 @@ export default function Register({ onHome, onSwitch }) {
     email: "",
     password: "",
     role: "user",
+    otp_code: "",
   });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [otpMessage, setOtpMessage] = useState("");
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleSendOtp() {
+    setError("");
+    setOtpMessage("");
+    try {
+      await sendOtp({ email: form.email, purpose: "register" });
+      setOtpMessage("OTP sent to your email.");
+    } catch (err) {
+      setError(normalizeError(err));
+    }
   }
 
   async function handleSubmit(event) {
@@ -38,6 +54,8 @@ export default function Register({ onHome, onSwitch }) {
 
     try {
       await register(form);
+      toast.success("Registration successful. Please login.");
+      onSwitch();
     } catch (err) {
       setError(normalizeError(err));
     } finally {
@@ -84,6 +102,21 @@ export default function Register({ onHome, onSwitch }) {
             value={form.password}
           />
         </label>
+        <div className="otpRow">
+          <label>
+            <span>Email OTP</span>
+            <input
+              onChange={(event) => updateField("otp_code", event.target.value)}
+              placeholder="6 digit OTP"
+              required
+              value={form.otp_code}
+            />
+          </label>
+          <button className="secondaryButton" disabled={!form.email} onClick={handleSendOtp} type="button">
+            Send OTP
+          </button>
+        </div>
+        {otpMessage && <div className="successAlert">{otpMessage}</div>}
         <label>
           <span>Role</span>
           <select onChange={(event) => updateField("role", event.target.value)} value={form.role}>
@@ -102,6 +135,7 @@ export default function Register({ onHome, onSwitch }) {
       <button className="textButton" onClick={onSwitch} type="button">
         Already have an account
       </button>
+      <GoogleAuthButton role={form.role} />
     </section>
   );
 }

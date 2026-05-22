@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
+import toast from "react-hot-toast";
 
+import StatsCard from "../components/StatsCard";
+import { Boxes, PackageCheck, TrendingUp, WalletCards } from "lucide-react";
 import { createProduct, deleteProduct, getSellerProducts } from "../services/authService";
 
 const blankProduct = {
@@ -17,7 +20,6 @@ const blankProduct = {
 export default function SellerDashboard() {
   const [products, setProducts] = useState([]);
   const [form, setForm] = useState(blankProduct);
-  const [message, setMessage] = useState("");
 
   async function refresh() {
     const { data } = await getSellerProducts();
@@ -34,7 +36,6 @@ export default function SellerDashboard() {
 
   async function submit(event) {
     event.preventDefault();
-    setMessage("");
     await createProduct({
       ...form,
       crop_type: form.crop_type.split(",").map((item) => item.trim()).filter(Boolean),
@@ -44,27 +45,29 @@ export default function SellerDashboard() {
       rating: Number(form.rating),
     });
     setForm(blankProduct);
-    setMessage("Product submitted to the marketplace.");
+    toast.success("Product submitted to the marketplace");
     await refresh();
   }
 
   return (
-    <main className="marketPage">
-      <section className="marketHero sellerHero">
+    <main className="pageStack">
+      <section className="pageHero compactHero">
         <div>
-          <p className="eyebrow">Seller Center</p>
-          <h1>List farm inputs for AgroMind buyers.</h1>
-          <p>Farmers, sellers, and admins can add fertilizers, pesticides, seeds, saplings, and organic products.</p>
+          <span className="eyebrowText">Seller Center</span>
+          <h1>List and manage farm inputs</h1>
+          <p>Add fertilizers, pesticides, seeds, saplings, tools, inventory, shipping details, and crop tags.</p>
         </div>
       </section>
-
+      <section className="statsGrid">
+        <StatsCard icon={Boxes} label="Products" value={products.length} />
+        <StatsCard icon={PackageCheck} label="Inventory Units" value={products.reduce((sum, item) => sum + Number(item.stock || 0), 0)} tone="teal" />
+        <StatsCard icon={TrendingUp} label="Sales" value="Live" tone="blue" />
+        <StatsCard icon={WalletCards} label="Payouts" value="Ready" tone="emerald" />
+      </section>
       <section className="adminGrid">
         <form className="panel checkoutForm" onSubmit={submit}>
-          <h2>Add Product for Selling</h2>
-          <label>
-            <span>Name</span>
-            <input onChange={(event) => update("name", event.target.value)} required value={form.name} />
-          </label>
+          <h2>Add Product</h2>
+          <label><span>Title</span><input onChange={(event) => update("name", event.target.value)} required value={form.name} /></label>
           <label>
             <span>Category</span>
             <select onChange={(event) => update("category", event.target.value)} value={form.category}>
@@ -72,44 +75,21 @@ export default function SellerDashboard() {
               <option value="pesticides">Pesticides</option>
               <option value="seeds">Seeds</option>
               <option value="trees">Trees/Saplings</option>
-              <option value="organic">Organic Products</option>
+              <option value="tools">Farming Tools</option>
             </select>
           </label>
-          <label>
-            <span>Crop types, comma separated</span>
-            <input onChange={(event) => update("crop_type", event.target.value)} placeholder="tomato, mango" value={form.crop_type} />
-          </label>
-          <label>
-            <span>Disease tags, comma separated</span>
-            <input onChange={(event) => update("disease_tags", event.target.value)} placeholder="early_blight, healthy" value={form.disease_tags} />
-          </label>
-          <label>
-            <span>Price</span>
-            <input min="0" onChange={(event) => update("price", event.target.value)} required type="number" value={form.price} />
-          </label>
-          <label>
-            <span>Stock</span>
-            <input min="0" onChange={(event) => update("stock", event.target.value)} required type="number" value={form.stock} />
-          </label>
-          <label>
-            <span>Image URL</span>
-            <input onChange={(event) => update("image", event.target.value)} placeholder="https://..." value={form.image} />
-          </label>
-          <label>
-            <span>Description</span>
-            <input onChange={(event) => update("description", event.target.value)} required value={form.description} />
-          </label>
-          <label>
-            <span>Rating</span>
-            <input max="5" min="0" onChange={(event) => update("rating", event.target.value)} step="0.1" type="number" value={form.rating} />
-          </label>
-          {message && <div className="successAlert">{message}</div>}
-          <button type="submit">Add Product</button>
+          <label><span>Crop types</span><input onChange={(event) => update("crop_type", event.target.value)} placeholder="tomato, mango" value={form.crop_type} /></label>
+          <label><span>Disease tags</span><input onChange={(event) => update("disease_tags", event.target.value)} placeholder="early_blight, healthy" value={form.disease_tags} /></label>
+          <label><span>Price</span><input min="0" onChange={(event) => update("price", event.target.value)} required type="number" value={form.price} /></label>
+          <label><span>Stock</span><input min="0" onChange={(event) => update("stock", event.target.value)} required type="number" value={form.stock} /></label>
+          <label><span>Product image URL</span><input onChange={(event) => update("image", event.target.value)} placeholder="https://..." value={form.image} /></label>
+          <label><span>Shipping details</span><input placeholder="Ships in 2-4 days, packed safely" /></label>
+          <label><span>Description</span><textarea onChange={(event) => update("description", event.target.value)} required value={form.description} /></label>
+          <button type="submit">Publish Product</button>
         </form>
-
         <section className="panel">
           <div className="sectionHeader">
-            <h2>Your Products</h2>
+            <div><span className="eyebrowText">Inventory</span><h2>Your Products</h2></div>
             <span>{products.length} listed</span>
           </div>
           <div className="adminList">
@@ -117,7 +97,8 @@ export default function SellerDashboard() {
               <article key={product.id}>
                 <span>{product.name}</span>
                 <strong>Rs. {product.price}</strong>
-                <button className="iconTextButton" onClick={() => deleteProduct(product.id).then(refresh)} type="button">Delete</button>
+                <span>{product.stock} in stock</span>
+                <button className="iconTextButton" onClick={() => deleteProduct(product.id).then(refresh)} type="button">Remove</button>
               </article>
             ))}
             {products.length === 0 && <p>No products listed yet.</p>}

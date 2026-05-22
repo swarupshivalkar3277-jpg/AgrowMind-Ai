@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import StatsCard from "../components/StatsCard";
+import { Boxes, PackageCheck, ShieldCheck, WalletCards } from "lucide-react";
 import { createProduct, deleteProduct, getAdminOrders, getProducts, updateAdminOrderStatus } from "../services/authService";
 
 const blankProduct = {
@@ -47,11 +49,26 @@ export default function AdminDashboard() {
     await refresh();
   }
 
+  const revenue = orders.reduce((sum, order) => sum + Number(order.total || 0), 0);
+
   return (
-    <main className="marketPage">
+    <main className="pageStack">
+      <section className="pageHero compactHero">
+        <div>
+          <span className="eyebrowText">Admin Dashboard</span>
+          <h1>Platform control center</h1>
+          <p>Manage users, sellers, products, orders, payments, and marketplace analytics from one protected route.</p>
+        </div>
+      </section>
+      <section className="statsGrid">
+        <StatsCard icon={ShieldCheck} label="Users" value="Role protected" />
+        <StatsCard icon={Boxes} label="Products" value={products.length} tone="teal" />
+        <StatsCard icon={PackageCheck} label="Orders" value={orders.length} tone="blue" />
+        <StatsCard icon={WalletCards} label="Payments" value={`Rs. ${revenue}`} tone="emerald" />
+      </section>
       <section className="adminGrid">
         <form className="panel checkoutForm" onSubmit={submit}>
-          <h1>Admin Products</h1>
+          <h2>Product Management</h2>
           {["name", "category", "price", "stock", "image", "description", "rating"].map((field) => (
             <label key={field}>
               <span>{field}</span>
@@ -63,24 +80,27 @@ export default function AdminDashboard() {
           <button type="submit">Add Product</button>
         </form>
         <section className="panel">
-          <h2>Inventory</h2>
+          <div className="sectionHeader"><div><span className="eyebrowText">Inventory</span><h2>Products</h2></div></div>
           <div className="adminList">
             {products.map((product) => (
               <article key={product.id}>
                 <span>{product.name}</span>
-                <strong>₹{product.price}</strong>
-                <button className="iconTextButton" onClick={() => deleteProduct(product.id).then(refresh)} type="button">Delete</button>
+                <strong>Rs. {product.price}</strong>
+                <span>{product.seller_name}</span>
+                <button className="iconTextButton" onClick={() => deleteProduct(product.id).then(refresh)} type="button">Remove</button>
               </article>
             ))}
           </div>
         </section>
       </section>
       <section className="panel">
-        <h2>Manage Orders</h2>
+        <div className="sectionHeader"><div><span className="eyebrowText">Operations</span><h2>Order Management</h2></div></div>
         <div className="adminList">
           {orders.map((order) => (
             <article key={order.id}>
-              <span>#{order.id.slice(-8)} - ₹{order.total} - {order.order_status}</span>
+              <span>#{order.id.slice(-8)} - Rs. {order.total}</span>
+              <strong>{order.payment_status}</strong>
+              <span>{order.payment_method}</span>
               <select onChange={(event) => updateAdminOrderStatus(order.id, event.target.value).then(refresh)} value={order.order_status}>
                 <option value="confirmed">confirmed</option>
                 <option value="packed">packed</option>

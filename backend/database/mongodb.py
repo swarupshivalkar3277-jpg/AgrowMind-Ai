@@ -242,6 +242,9 @@ async def ensure_indexes() -> None:
         ("disease", 1)
     ], unique=True)
 
+    await db.email_otps.create_index("expires_at", expireAfterSeconds=0)
+    await db.email_otps.create_index([("email", 1), ("purpose", 1), ("created_at", -1)])
+
     logger.info("All MongoDB indexes created successfully")
 
 

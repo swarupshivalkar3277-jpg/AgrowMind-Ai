@@ -1,6 +1,6 @@
 import { createContext, createElement, useContext, useEffect, useMemo, useState } from "react";
 
-import { getProfile, loginUser, logoutUser, registerUser } from "../services/authService";
+import { getProfile, googleAuth, loginUser, logoutUser, registerUser } from "../services/authService";
 
 const AuthContext = createContext(null);
 
@@ -45,12 +45,19 @@ export function AuthProvider({ children }) {
   }, [token]);
 
   async function register(payload) {
-    await registerUser(payload);
-    return login(payload.email, payload.password);
+    const { data } = await registerUser(payload);
+    return data;
   }
 
-  async function login(email, password) {
-    const { data } = await loginUser({ email, password });
+  async function login(email, password, otp_code = "") {
+    const { data } = await loginUser({ email, password, otp_code });
+    localStorage.setItem("token", data.access_token);
+    setToken(data.access_token);
+    return data;
+  }
+
+  async function loginWithGoogle(idToken, role = "user") {
+    const { data } = await googleAuth({ id_token: idToken, role });
     localStorage.setItem("token", data.access_token);
     setToken(data.access_token);
     return data;
@@ -71,6 +78,7 @@ export function AuthProvider({ children }) {
       isAuthenticated: Boolean(token),
       loading,
       login,
+      loginWithGoogle,
       logout,
       register,
       token,

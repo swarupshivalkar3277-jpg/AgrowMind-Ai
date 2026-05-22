@@ -1,9 +1,16 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import { CalendarClock, Quote, UserRound } from "lucide-react";
+import toast from "react-hot-toast";
 
+import AIChatAssistantPlaceholder from "../components/AIChatAssistantPlaceholder";
+import AnalyticsCard from "../components/AnalyticsCard";
+import DashboardStats from "../components/DashboardStats";
+import PredictionResultCard from "../components/PredictionResultCard";
+import UploadBox from "../components/UploadBox";
+import WeatherCard from "../components/WeatherCard";
 import { useAuth } from "../context/AuthContext";
-import PredictionCards, { SeverityBadge } from "../components/PredictionCards";
-import api, { API_BASE, getHistory } from "../services/authService";
+import api, { getHistory } from "../services/authService";
 import { downloadPredictionReport } from "../utils/reportPdf";
 
 const crops = [
@@ -14,28 +21,14 @@ const crops = [
 
 function normalizeError(error) {
   const detail = error?.response?.data?.detail;
-
-  if (typeof detail === "string") {
-    return detail;
-  }
-
-  if (detail?.error) {
-    return detail.error;
-  }
-
-  if (Array.isArray(detail)) {
-    return detail.map((item) => item.msg).filter(Boolean).join(", ");
-  }
-
+  if (typeof detail === "string") return detail;
+  if (detail?.error) return detail.error;
+  if (Array.isArray(detail)) return detail.map((item) => item.msg).filter(Boolean).join(", ");
   return error?.message || "Request failed";
 }
 
-function formatDiseaseName(value = "") {
-  return value.replaceAll("_", " ");
-}
-
-export default function Dashboard({ onHome }) {
-  const { logout, user } = useAuth();
+export default function Dashboard() {
+  const { user } = useAuth();
   const [crop, setCrop] = useState("tomato");
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -43,45 +36,22 @@ export default function Dashboard({ onHome }) {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [historyFilter, setHistoryFilter] = useState("");
+  const now = useMemo(() => new Date(), []);
 
   useEffect(() => {
-    refreshHistory();
+    getHistory().then(({ data }) => setHistory(data.items || [])).catch(() => setHistory([]));
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
-      }
-    };
-  }, [previewUrl]);
-
-  async function refreshHistory() {
-    try {
-      const { data } = await getHistory();
-      setHistory(data.items || []);
-    } catch {
-      setHistory([]);
-    }
-  }
+  useEffect(() => () => previewUrl && URL.revokeObjectURL(previewUrl), [previewUrl]);
 
   function handleFileChange(event) {
     const selected = event.target.files?.[0];
-
-    if (!selected) {
-      return;
-    }
-
+    if (!selected) return;
     if (!selected.type.startsWith("image/")) {
       setError("Please upload a valid image file.");
       return;
     }
-
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-    }
-
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
     setFile(selected);
     setPreviewUrl(URL.createObjectURL(selected));
     setResult(null);
@@ -90,7 +60,6 @@ export default function Dashboard({ onHome }) {
 
   async function handlePredict(event) {
     event.preventDefault();
-
     if (!file) {
       setError("Please upload a crop leaf image.");
       return;
@@ -98,7 +67,6 @@ export default function Dashboard({ onHome }) {
 
     const formData = new FormData();
     formData.append("file", file);
-
     setLoading(true);
     setError("");
 
@@ -107,140 +75,69 @@ export default function Dashboard({ onHome }) {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setResult({ ...data, created_at: new Date().toISOString() });
-      await refreshHistory();
+      const historyResult = await getHistory();
+      setHistory(historyResult.data.items || []);
+      toast.success("Prediction completed");
     } catch (err) {
-      setError(normalizeError(err));
+      const message = normalizeError(err);
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
   }
 
-  const filteredHistory = history.filter((item) => {
-    const query = historyFilter.trim().toLowerCase();
-
-    if (!query) {
-      return true;
-    }
-
-    return [
-      item.crop,
-      item.prediction?.disease,
-      item.prediction?.severity,
-      item.prediction?.harvest_risk,
-    ]
-      .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(query));
-  });
-
   return (
-    <main className="dashboard">
-      <header className="topbar">
+    <main className="pageStack">
+      <motion.section className="dashboardHero" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}>
         <div>
-          <p className="eyebrow">Protected Dashboard</p>
-          <h1>AgroMind AI</h1>
-          <span>{user?.name} - {user?.role}</span>
+          <span className="eyebrowText">AI Agriculture SaaS</span>
+          <h1>Welcome back, {user?.name || "farmer"}</h1>
+          <p>Detect crop disease, convert insight into treatment, and buy trusted farm inputs from one workspace.</p>
+          <div className="heroMeta">
+            <span><CalendarClock size={17} /> {now.toLocaleDateString()} {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+            <span><Quote size={17} /> Healthy crops begin with early signals.</span>
+          </div>
         </div>
-        <div className="topbarActions">
-          <Link className="secondaryButton" to="/marketplace">
-            Marketplace
-          </Link>
-          {(user?.role === "farmer" || user?.role === "seller" || user?.role === "admin") && (
-            <Link className="secondaryButton" to="/sell">
-              Sell Products
-            </Link>
-          )}
-          <button className="secondaryButton" onClick={onHome} type="button">
-            Home
-          </button>
-          <button className="secondaryButton" onClick={logout} type="button">
-            Logout
-          </button>
-        </div>
-      </header>
+        <article className="profileSummary">
+          <UserRound size={28} />
+          <strong>{user?.name}</strong>
+          <span>{user?.role || "user"} account</span>
+          <small>{user?.email}</small>
+        </article>
+      </motion.section>
 
-      <section className="workspace">
-        <form className="panel controls" onSubmit={handlePredict}>
-          <label>
-            <span>Select Crop</span>
-            <select onChange={(event) => setCrop(event.target.value)} value={crop}>
-              {crops.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Leaf Image</span>
-            <input accept="image/*" onChange={handleFileChange} type="file" />
-          </label>
-          {previewUrl && <img alt="Leaf preview" className="previewImage" src={previewUrl} />}
-          {error && <div className="alert">{error}</div>}
-          <button disabled={loading} type="submit">
-            {loading ? "Analyzing..." : "Predict Disease"}
-          </button>
-          <div className="apiStatus">API: {API_BASE}</div>
-        </form>
+      <DashboardStats historyCount={history.length} />
 
-        <section className="panel resultPanel">
+      <section className="dashboardGrid">
+        <UploadBox
+          crop={crop}
+          crops={crops}
+          error={error}
+          file={file}
+          loading={loading}
+          onCrop={setCrop}
+          onFile={handleFileChange}
+          onSubmit={handlePredict}
+          previewUrl={previewUrl}
+        />
+        <div className="predictionPanel">
           {loading ? (
-            <div className="analysisLoader">
-              <span />
-              <strong>Analyzing crop health...</strong>
-              <p>Running disease detection and preparing farming advice.</p>
-            </div>
-          ) : result ? (
-            <PredictionCards
-              crop={result.crop}
-              onDownload={() =>
-                downloadPredictionReport({
-                  user,
-                  crop: result.crop,
-                  prediction: result.prediction,
-                  createdAt: result.created_at,
-                })
-              }
-              prediction={result.prediction}
-            />
+            <div className="analysisLoader"><span /><strong>Analyzing crop health...</strong><p>Preparing disease intelligence and product matches.</p></div>
           ) : (
-            <div className="emptyState">
-              <h2>Ready for analysis</h2>
-              <p>Upload a crop leaf image to call the protected prediction API.</p>
-            </div>
+            <PredictionResultCard
+              crop={result?.crop || crop}
+              onDownload={() => downloadPredictionReport({ user, crop: result.crop, prediction: result.prediction, createdAt: result.created_at })}
+              prediction={result?.prediction}
+            />
           )}
-        </section>
+        </div>
       </section>
 
-      <section className="panel history">
-        <div className="sectionHeader">
-          <div>
-            <h2>Prediction History</h2>
-            <span>{filteredHistory.length} of {history.length} saved</span>
-          </div>
-          <label className="historySearch">
-            <span>Search history</span>
-            <input
-              onChange={(event) => setHistoryFilter(event.target.value)}
-              placeholder="Filter by crop, disease, severity"
-              type="search"
-              value={historyFilter}
-            />
-          </label>
-        </div>
-        <div className="historyList">
-          {filteredHistory.map((item) => (
-            <article key={item.id}>
-              <div>
-                <strong>{formatDiseaseName(item.prediction?.disease)}</strong>
-                <span>{item.crop} - {item.prediction?.confidence}% confidence</span>
-              </div>
-              <SeverityBadge value={item.prediction?.severity} />
-              <small>{new Date(item.created_at).toLocaleString()}</small>
-            </article>
-          ))}
-          {history.length === 0 && <p>No predictions yet.</p>}
-          {history.length > 0 && filteredHistory.length === 0 && <p>No matching predictions.</p>}
-        </div>
+      <section className="insightGrid">
+        <WeatherCard />
+        <AnalyticsCard />
+        <AIChatAssistantPlaceholder />
       </section>
     </main>
   );

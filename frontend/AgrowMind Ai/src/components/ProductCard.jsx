@@ -1,7 +1,9 @@
 import { Link, useNavigate } from "react-router-dom";
+import { Heart, ShoppingCart, Star } from "lucide-react";
+import toast from "react-hot-toast";
 
-import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
+import { useCart } from "../context/CartContext";
 import { toggleWishlist } from "../services/authService";
 
 export default function ProductCard({ product }) {
@@ -15,6 +17,7 @@ export default function ProductCard({ product }) {
       return;
     }
     await add(product.id, 1);
+    toast.success("Added to cart");
   }
 
   async function handleWishlist() {
@@ -23,12 +26,13 @@ export default function ProductCard({ product }) {
       return;
     }
     await toggleWishlist(product.id);
+    toast.success("Wishlist updated");
   }
 
   return (
     <article className="productCard">
       <Link to={`/marketplace/product/${product.id}`}>
-        <img alt={product.name} src={product.image} />
+        <img alt={product.name} src={product.image || "https://images.unsplash.com/photo-1464226184884-fa280b87c399?auto=format&fit=crop&w=900&q=80"} />
       </Link>
       <div className="productCardBody">
         <div>
@@ -37,12 +41,12 @@ export default function ProductCard({ product }) {
           <p>{product.description}</p>
         </div>
         <div className="productMeta">
-          <strong>₹{product.price}</strong>
-          <span>★ {product.rating}</span>
+          <strong>Rs. {product.price}</strong>
+          <span><Star size={15} fill="currentColor" /> {product.rating}</span>
         </div>
         <div className="productActions">
-          <button onClick={handleAdd} type="button">Add to Cart</button>
-          <button className="iconTextButton" onClick={handleWishlist} type="button">Wishlist</button>
+          <button onClick={handleAdd} type="button"><ShoppingCart size={17} /> Add</button>
+          <button className="iconTextButton" onClick={handleWishlist} type="button"><Heart size={17} /> Save</button>
         </div>
       </div>
     </article>

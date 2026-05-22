@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import os
 from datetime import datetime, timezone
-from pathlib import Path
 from uuid import uuid4
 
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+import requests
 from pymongo import ReturnDocument
 from pymongo.errors import PyMongoError
 
@@ -20,8 +19,6 @@ from database.mongodb import db, drop_parallel_array_product_indexes
 
 router = APIRouter(prefix="/marketplace", tags=["Marketplace"])
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-PRODUCT_SEED_PATH = BASE_DIR / "data" / "products.json"
 TAX_RATE = 0.05
 FREE_SHIPPING_THRESHOLD = 999
 DELIVERY_CHARGE = 60
@@ -43,6 +40,10 @@ class CheckoutAddress(BaseModel):
     razorpay_order_id: str | None = None
     razorpay_payment_id: str | None = None
     razorpay_signature: str | None = None
+
+
+class RazorpayOrderRequest(BaseModel):
+    receipt: str | None = None
 
 
 class ProductIn(BaseModel):
@@ -99,27 +100,13 @@ def serialize_order(order: dict) -> dict:
     }
 
 
-async def ensure_seed_products() -> None:
+async def cleanup_seed_products() -> None:
     await drop_parallel_array_product_indexes()
-
-    if await db.products.estimated_document_count():
-        return
-
-    with PRODUCT_SEED_PATH.open("r", encoding="utf-8") as file:
-        products = json.load(file)
-
-    now = datetime.now(timezone.utc)
-    for product in products:
-        product["created_at"] = now
-        product["updated_at"] = now
-        product["seller_id"] = "system"
-        product["seller_name"] = "AgroMind Store"
-
-    await db.products.insert_many(products)
+    await db.products.delete_many({"seller_id": "system"})
 
 
 async def recommended_products(crop: str, disease: str, limit: int = 6) -> list[dict]:
-    await ensure_seed_products()
+    await cleanup_seed_products()
     query = {
         "$or": [
             {"crop_type": crop},
@@ -129,6 +116,30 @@ async def recommended_products(crop: str, disease: str, limit: int = 6) -> list[
     }
     cursor = db.products.find(query).sort([("rating", -1), ("stock", -1)]).limit(limit)
     return [serialize_product(product) async for product in cursor]
+
+
+async def ensure_stock(cart: dict) -> None:
+    for item in cart["items"]:
+        product = await db.products.find_one({"_id": object_id(item["product"]["id"])})
+        if not product or int(product.get("stock", 0)) < int(item["quantity"]):
+            raise HTTPException(status_code=400, detail=f"Insufficient stock for {item['product']['name']}")
+
+
+async def decrement_stock(cart: dict) -> None:
+    await ensure_stock(cart)
+    for item in cart["items"]:
+        await db.products.update_one(
+            {"_id": object_id(item["product"]["id"])},
+            {"$inc": {"stock": -int(item["quantity"])}},
+        )
+
+
+def razorpay_credentials() -> tuple[str, str]:
+    key_id = os.getenv("RAZORPAY_KEY_ID")
+    key_secret = os.getenv("RAZORPAY_KEY_SECRET")
+    if not key_id or not key_secret:
+        raise HTTPException(status_code=503, detail="RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are not configured")
+    return key_id, key_secret
 
 
 async def cart_document(user_id: str) -> dict:
@@ -195,7 +206,7 @@ async def list_products(
     disease: str = "",
     limit: int = Query(default=60, ge=1, le=100),
 ):
-    await ensure_seed_products()
+    await cleanup_seed_products()
     filters = []
 
     if search:
@@ -337,6 +348,42 @@ async def toggle_wishlist(product_id: str, user=Depends(get_current_user)):
     return {"success": True, "wishlisted": True}
 
 
+@router.post("/payment/razorpay-order")
+async def create_razorpay_order(payload: RazorpayOrderRequest, user=Depends(get_current_user)):
+    cart = await hydrate_cart(await cart_document(str(user["_id"])))
+    if not cart["items"]:
+        raise HTTPException(status_code=400, detail="Cart is empty")
+    await ensure_stock(cart)
+
+    key_id, key_secret = razorpay_credentials()
+    receipt = payload.receipt or f"agromind-{uuid4().hex[:16]}"
+    response = requests.post(
+        "https://api.razorpay.com/v1/orders",
+        auth=(key_id, key_secret),
+        json={
+            "amount": int(round(cart["total"] * 100)),
+            "currency": "INR",
+            "receipt": receipt,
+            "notes": {"user_id": str(user["_id"]), "email": user["email"]},
+        },
+        timeout=20,
+    )
+
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Razorpay order creation failed: {response.text}")
+
+    order = response.json()
+    await db.payments.insert_one({
+        "user_id": str(user["_id"]),
+        "status": "created",
+        "method": "razorpay",
+        "razorpay_order_id": order.get("id"),
+        "amount": cart["total"],
+        "created_at": datetime.now(timezone.utc),
+    })
+    return {"success": True, "key_id": key_id, "razorpay_order": order, "cart": cart}
+
+
 @router.get("/wishlist")
 async def get_wishlist(user=Depends(get_current_user)):
     ids = [object_id(item["product_id"]) async for item in db.wishlist.find({"user_id": str(user["_id"])})]
@@ -375,6 +422,7 @@ async def checkout(payload: CheckoutAddress, user=Depends(get_current_user)):
     else:
         raise HTTPException(status_code=400, detail="Unsupported payment method")
 
+    await decrement_stock(cart)
     now = datetime.now(timezone.utc)
     order = {
         "user_id": str(user["_id"]),

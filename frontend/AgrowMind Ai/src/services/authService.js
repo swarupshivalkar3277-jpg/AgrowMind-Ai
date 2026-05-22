@@ -38,6 +38,18 @@ export function loginUser(payload) {
   });
 }
 
+export function sendOtp(payload) {
+  return api.post("/auth/send-otp", payload);
+}
+
+export function forgotPassword(payload) {
+  return api.post("/auth/forgot-password", payload);
+}
+
+export function googleAuth(payload) {
+  return api.post("/auth/google", payload);
+}
+
 export function logoutUser() {
   return api.post("/auth/logout");
 }
@@ -100,6 +112,10 @@ export function getWishlist() {
 
 export function checkoutCart(payload) {
   return api.post("/marketplace/checkout", payload);
+}
+
+export function createRazorpayOrder(payload = {}) {
+  return api.post("/marketplace/payment/razorpay-order", payload);
 }
 
 export function getOrders() {

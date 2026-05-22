@@ -6,7 +6,7 @@ export default function Cart() {
   const { cart, remove, update } = useCart();
 
   return (
-    <main className="marketPage">
+    <main className="pageStack">
       <section className="panel cartPage">
         <div className="sectionHeader">
           <h1>Shopping Cart</h1>
@@ -19,14 +19,14 @@ export default function Cart() {
                 <img alt={item.product.name} src={item.product.image} />
                 <div>
                   <strong>{item.product.name}</strong>
-                  <span>₹{item.product.price} each</span>
+                  <span>Rs. {item.product.price} each</span>
                   <div className="quantityControl">
                     <button onClick={() => update(item.product.id, item.quantity - 1)} type="button">-</button>
                     <span>{item.quantity}</span>
                     <button onClick={() => update(item.product.id, item.quantity + 1)} type="button">+</button>
                   </div>
                 </div>
-                <strong>₹{item.line_total}</strong>
+                <strong>Rs. {item.line_total}</strong>
                 <button className="iconTextButton" onClick={() => remove(item.product.id)} type="button">Remove</button>
               </article>
             ))}
@@ -34,10 +34,10 @@ export default function Cart() {
           </div>
           <aside className="orderSummary">
             <h2>Order Summary</h2>
-            <span>Subtotal ₹{cart.subtotal}</span>
-            <span>Tax ₹{cart.tax}</span>
-            <span>Delivery ₹{cart.shipping}</span>
-            <strong>Total ₹{cart.total}</strong>
+            <span>Subtotal Rs. {cart.subtotal}</span>
+            <span>Tax Rs. {cart.tax}</span>
+            <span>Delivery Rs. {cart.shipping}</span>
+            <strong>Total Rs. {cart.total}</strong>
             <Link className="primaryButton" to="/checkout">Checkout</Link>
           </aside>
         </div>
