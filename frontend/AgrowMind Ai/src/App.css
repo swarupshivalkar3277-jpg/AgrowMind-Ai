@@ -617,6 +617,178 @@ body.dark .topSearch { background: rgba(15, 23, 42, 0.58); }
 }
 .mobileBottomNav { display: none; }
 
+.homePage, .publicPage {
+  min-height: 100vh;
+}
+
+.siteNav {
+  width: min(1180px, calc(100% - 32px));
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 14px auto 0;
+  padding: 10px 12px 10px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--soft-shadow);
+  backdrop-filter: blur(18px);
+  position: sticky;
+  top: 12px;
+  z-index: 80;
+}
+
+.brandButton {
+  color: var(--text);
+  background: transparent;
+  font-size: 1.08rem;
+  font-weight: 900;
+}
+
+.navActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.navActions > a:not(.primaryButton):not(.secondaryButton) {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--muted);
+  font-weight: 850;
+}
+
+.homeHero {
+  width: min(1180px, calc(100% - 32px));
+  min-height: min(720px, calc(100vh - 112px));
+  display: flex;
+  align-items: center;
+  margin: 18px auto 0;
+  padding: clamp(28px, 6vw, 72px);
+  border-radius: var(--radius);
+  color: white;
+  background:
+    linear-gradient(95deg, rgba(5, 46, 22, 0.9), rgba(13, 148, 136, 0.68), rgba(15, 23, 42, 0.24)),
+    url("https://images.unsplash.com/photo-1523741543316-beb7fc7023d8?auto=format&fit=crop&w=1900&q=82") center/cover;
+  box-shadow: var(--shadow);
+}
+
+.heroCopy {
+  width: min(680px, 100%);
+  display: grid;
+  gap: 20px;
+}
+
+.eyebrow {
+  color: #a7f3d0;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.heroCopy h1 {
+  color: white;
+  font-size: clamp(3rem, 10vw, 7.5rem);
+  line-height: 0.92;
+}
+
+.heroCopy p {
+  max-width: 620px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: clamp(1rem, 2vw, 1.18rem);
+  line-height: 1.7;
+}
+
+.featureBand, .diseaseIntro, .marketPreview, .siteFooter {
+  width: min(1180px, calc(100% - 32px));
+  margin: 18px auto 0;
+}
+
+.featureBand {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.featureCard {
+  min-height: 250px;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  box-shadow: var(--soft-shadow);
+}
+
+.featureCard svg, .diseaseSteps svg {
+  color: var(--green);
+}
+
+.featureCard h2, .diseaseIntro h2, .marketPreview h2 {
+  font-size: clamp(1.5rem, 3vw, 2.6rem);
+  line-height: 1.05;
+}
+
+.featureCard p, .diseaseIntro p, .marketPreview p {
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.diseaseIntro, .marketPreview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: center;
+  padding: clamp(24px, 4vw, 42px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--soft-shadow);
+}
+
+.diseaseIntro > div:first-child, .marketPreview > div:first-child {
+  display: grid;
+  gap: 12px;
+}
+
+.diseaseSteps {
+  display: grid;
+  gap: 10px;
+  min-width: min(320px, 100%);
+}
+
+.diseaseSteps span {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  font-weight: 900;
+}
+
+.siteFooter {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 0 34px;
+  color: var(--muted);
+}
+
+.siteFooter strong {
+  color: var(--text);
+}
+
 @media (max-width: 1120px) {
   .appShell { grid-template-columns: 1fr; }
   .sidebar {
@@ -630,7 +802,7 @@ body.dark .topSearch { background: rgba(15, 23, 42, 0.58); }
   .sidebar.open { transform: translateX(0); }
   .sidebarScrim.show { display: block; position: fixed; inset: 0; z-index: 45; background: rgba(2, 6, 23, 0.42); }
   .mobileOnly { display: inline-grid; }
-  .statsGrid, .productGrid, .productGrid.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .statsGrid, .productGrid, .productGrid.compact, .featureBand { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboardGrid, .productDetail, .cartLayout, .checkoutGrid, .adminGrid { grid-template-columns: 1fr; }
   .chartCard { grid-column: auto; }
 }
@@ -655,6 +827,25 @@ body.dark .topSearch { background: rgba(15, 23, 42, 0.58); }
   .historyActions { justify-content: flex-start; }
   .otpRow { grid-template-columns: 1fr; }
   .fab { bottom: 86px; right: 16px; }
+  .siteNav, .siteFooter {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .navActions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .navActions .primaryButton, .navActions .secondaryButton {
+    flex: 1;
+    min-width: 126px;
+  }
+  .homeHero {
+    min-height: 560px;
+    align-items: flex-end;
+  }
+  .featureBand, .diseaseIntro, .marketPreview {
+    grid-template-columns: 1fr;
+  }
   .mobileBottomNav {
     position: fixed;
     left: 10px;

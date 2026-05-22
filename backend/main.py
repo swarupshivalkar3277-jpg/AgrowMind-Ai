@@ -79,20 +79,78 @@ async def startup_event():
     except Exception as e:
         logger.exception("Model startup warning: %s", str(e))
 
+@app.options("/{full_path:path}", include_in_schema=False)
+async def preflight_handler(full_path: str):
+    return JSONResponse(
+        status_code=200,
+        content={"ok": True}
+    )
+
+
 # =========================
 # CORS
 # =========================
 
-ALLOWED_ORIGINS = ["*"]
+# =========================
+# CORS
+# =========================
+
+def _csv_env(name: str) -> list[str]:
+    raw = os.getenv(name, "")
+    return [
+        value.strip().rstrip("/")
+        for value in raw.split(",")
+        if value.strip()
+    ]
+
+
+DEFAULT_ORIGINS = [
+    # Production
+    "https://agrowmindai.vercel.app",
+
+    # Localhost
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5175",
+    "http://127.0.0.1:5175",
+
+    # React/Vite LAN access
+    "http://0.0.0.0:5173",
+    "http://0.0.0.0:5175",
+]
+
+
+ALLOWED_ORIGINS = sorted(set(
+    DEFAULT_ORIGINS
+    + _csv_env("CORS_ORIGINS")
+    + _csv_env("FRONTEND_ORIGINS")
+    + _csv_env("FRONTEND_ORIGIN")
+))
 
 logger.info("Allowed CORS origins: %s", ALLOWED_ORIGINS)
 
+
 app.add_middleware(
     CORSMiddleware,
+
+    # IMPORTANT
     allow_origins=ALLOWED_ORIGINS,
+
+    # NEVER use "*" with credentials=True
     allow_credentials=True,
-    allow_methods=["*"],
+
+    allow_methods=[
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "OPTIONS",
+        "PATCH",
+    ],
+
     allow_headers=["*"],
+
+    expose_headers=["*"],
 )
 
 # =========================

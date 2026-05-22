@@ -9,7 +9,8 @@ export const API_BASE =
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 45000,
+  timeout: 30000,
+  withCredentials: false,
 });
 
 api.interceptors.request.use((config) => {
@@ -21,6 +22,18 @@ api.interceptors.request.use((config) => {
 
   return config;
 });
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      localStorage.removeItem("token");
+      window.dispatchEvent(new Event("agromind:unauthorized"));
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 export function registerUser(payload) {
   return api.post("/auth/register", payload, {

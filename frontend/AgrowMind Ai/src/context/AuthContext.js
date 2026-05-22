@@ -5,9 +5,30 @@ import { getProfile, googleAuth, loginUser, logoutUser, registerUser } from "../
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => localStorage.getItem("token"));
+  const [token, setToken] = useState(() => {
+    const urlToken = new URLSearchParams(window.location.search).get("token");
+
+    if (urlToken) {
+      localStorage.setItem("token", urlToken);
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return urlToken;
+    }
+
+    return localStorage.getItem("token");
+  });
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(Boolean(token));
+
+  useEffect(() => {
+    function handleUnauthorized() {
+      setToken(null);
+      setUser(null);
+      setLoading(false);
+    }
+
+    window.addEventListener("agromind:unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("agromind:unauthorized", handleUnauthorized);
+  }, []);
 
   useEffect(() => {
     let ignore = false;

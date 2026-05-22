@@ -4,12 +4,15 @@ import { Search, SlidersHorizontal } from "lucide-react";
 
 import MarketplaceCarousel from "../components/MarketplaceCarousel";
 import ProductCard from "../components/ProductCard";
+import PublicNav from "../components/PublicNav";
+import { useAuth } from "../context/AuthContext";
 import { getProducts } from "../services/authService";
 
 const categories = ["fertilizers", "seeds", "trees", "pesticides", "tools"];
 const crops = ["tomato", "mango", "coconut"];
 
 export default function Marketplace() {
+  const { isAuthenticated } = useAuth();
   const [params, setParams] = useSearchParams();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -38,14 +41,18 @@ export default function Marketplace() {
   }
 
   return (
-    <main className="pageStack">
+    <main className="publicPage">
+      <PublicNav />
+      <div className="pageStack">
       <section className="marketHero">
         <div>
           <span className="eyebrowText">AgroMind Marketplace</span>
           <h1>Farm inputs matched to crop intelligence.</h1>
           <p>Shop fertilizers, pesticides, seeds, saplings, and tools with AI-led recommendations.</p>
         </div>
-        <Link className="primaryButton" to="/cart">Go to Cart</Link>
+        <Link className={isAuthenticated ? "primaryButton" : "secondaryButton"} to={isAuthenticated ? "/cart" : "/login"}>
+          {isAuthenticated ? "Go to Cart" : "Login Required to Buy"}
+        </Link>
       </section>
       <MarketplaceCarousel />
       <section className="marketFilters panel">
@@ -66,6 +73,7 @@ export default function Marketplace() {
         {!loading && products.map((product) => <ProductCard key={product.id} product={product} />)}
       </section>
       {!loading && products.length === 0 && <div className="emptyMarket">No products found.</div>}
+      </div>
     </main>
   );
 }

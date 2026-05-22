@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 
 import AppShell from "./components/AppShell";
@@ -12,6 +12,7 @@ import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import Dashboard from "./pages/Dashboard";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import Home from "./pages/Home";
 import HistoryPage from "./pages/HistoryPage";
 import Login from "./pages/Login";
 import Marketplace from "./pages/Marketplace";
@@ -37,13 +38,14 @@ function LoadingScreen({ label = "Loading secure workspace..." }) {
 
 function ProtectedRoute({ children, adminOnly = false, sellerOnly = false }) {
   const { isAuthenticated, loading, user } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return <LoadingScreen />;
   }
 
   if (!isAuthenticated) {
-    return <Navigate replace to="/login" />;
+    return <Navigate replace to="/login" state={{ from: location.pathname }} />;
   }
 
   if (adminOnly && user?.role !== "admin") {
@@ -85,14 +87,14 @@ function AppRoutes() {
   return (
     <>
       <Routes>
-        <Route path="/" element={<Navigate replace to="/dashboard" />} />
+        <Route path="/" element={<Home />} />
+        <Route path="/marketplace" element={<Marketplace />} />
+        <Route path="/marketplace/product/:id" element={<ProductDetails />} />
         <Route path="/login" element={<PublicOnly><main className="authPage"><LoginRoute /></main></PublicOnly>} />
         <Route path="/register" element={<PublicOnly><main className="authPage"><RegisterRoute /></main></PublicOnly>} />
         <Route path="/forgot-password" element={<PublicOnly><main className="authPage"><ForgotPasswordPage /></main></PublicOnly>} />
         <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/marketplace" element={<Marketplace />} />
-          <Route path="/marketplace/product/:id" element={<ProductDetails />} />
           <Route path="/cart" element={<Cart />} />
           <Route path="/checkout" element={<Checkout />} />
           <Route path="/orders" element={<Orders />} />

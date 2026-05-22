@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import toast from "react-hot-toast";
 
 import { useAuth } from "../context/AuthContext";
 
@@ -25,11 +26,13 @@ export default function GoogleAuthButton({ role = "user" }) {
         callback: async (response) => {
           try {
             await loginWithGoogle(response.credential, role);
+            toast.success("Signed in with Google");
           } catch (err) {
             setError(err?.response?.data?.detail || "Google sign-in failed");
           }
         },
       });
+      buttonRef.current.innerHTML = "";
       window.google.accounts.id.renderButton(buttonRef.current, {
         theme: "outline",
         size: "large",

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import { useAuth } from "../context/AuthContext";
@@ -12,6 +12,7 @@ function normalizeError(error) {
 
 export default function Login({ onHome, onSwitch, startForgot = false }) {
   const { login } = useAuth();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [otpCode, setOtpCode] = useState("");
@@ -20,6 +21,7 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -47,11 +49,15 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
   async function handleSendOtp(purpose = "login") {
     setError("");
     setMessage("");
+    setSendingOtp(true);
     try {
       await sendOtp({ email, purpose });
       setMessage("OTP sent to your email.");
+      toast.success("OTP sent to your email");
     } catch (err) {
       setError(normalizeError(err));
+    } finally {
+      setSendingOtp(false);
     }
   }
 
@@ -106,12 +112,12 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
               value={otpCode}
             />
           </label>
-          <button className="secondaryButton" disabled={!email} onClick={() => handleSendOtp(forgotMode ? "forgot_password" : "login")} type="button">
-            Send OTP
+          <button className="secondaryButton" disabled={!email || sendingOtp} onClick={() => handleSendOtp(forgotMode ? "forgot_password" : "login")} type="button">
+            {sendingOtp ? "Sending..." : "Send OTP"}
           </button>
         </div>
         {message && <div className="successAlert">{message}</div>}
-        {error && <div className="alert">{error}</div>}
+        {(error || searchParams.get("error")) && <div className="alert">{error || searchParams.get("error")}</div>}
         <button disabled={submitting} type="submit">
           {submitting ? "Please wait..." : forgotMode ? "Reset Password" : "Login"}
         </button>

@@ -13,6 +13,7 @@ export default function ProductCard({ product }) {
 
   async function handleAdd() {
     if (!isAuthenticated) {
+      toast.error("Login required to buy products");
       navigate("/login");
       return;
     }
@@ -22,6 +23,7 @@ export default function ProductCard({ product }) {
 
   async function handleWishlist() {
     if (!isAuthenticated) {
+      toast.error("Login required to save products");
       navigate("/login");
       return;
     }
@@ -45,7 +47,9 @@ export default function ProductCard({ product }) {
           <span><Star size={15} fill="currentColor" /> {product.rating}</span>
         </div>
         <div className="productActions">
-          <button onClick={handleAdd} type="button"><ShoppingCart size={17} /> Add</button>
+          <button onClick={handleAdd} type="button">
+            <ShoppingCart size={17} /> {isAuthenticated ? "Add" : "Login Required to Buy"}
+          </button>
           <button className="iconTextButton" onClick={handleWishlist} type="button"><Heart size={17} /> Save</button>
         </div>
       </div>

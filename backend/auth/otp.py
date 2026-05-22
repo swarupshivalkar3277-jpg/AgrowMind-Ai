@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 
 from fastapi import HTTPException
+from starlette.concurrency import run_in_threadpool
 
 from database.mongodb import db
 
@@ -69,7 +70,7 @@ async def create_and_send_otp(email: str, purpose: str) -> None:
         "expires_at": now + timedelta(minutes=OTP_EXPIRY_MINUTES),
         "created_at": now,
     })
-    send_email_otp(email.lower(), code, purpose)
+    await run_in_threadpool(send_email_otp, email.lower(), code, purpose)
 
 
 async def verify_otp(email: str, purpose: str, code: str | None) -> None:

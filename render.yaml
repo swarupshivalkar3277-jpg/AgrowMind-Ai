@@ -20,6 +20,24 @@ services:
         value: 1.1.1.1,8.8.8.8
       - key: FRONTEND_ORIGIN
         value: https://agrowmindai.vercel.app
+      - key: CORS_ORIGINS
+        value: https://agrowmindai.vercel.app
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        value: https://agromind-ai-api.onrender.com/auth/google/callback
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
       - key: MODEL_DIRS
         sync: false
       - key: MODEL_BASE_URL

@@ -30,6 +30,7 @@ export default function Register({ onHome, onSwitch }) {
   });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
   const [otpMessage, setOtpMessage] = useState("");
 
   function updateField(field, value) {
@@ -39,11 +40,15 @@ export default function Register({ onHome, onSwitch }) {
   async function handleSendOtp() {
     setError("");
     setOtpMessage("");
+    setSendingOtp(true);
     try {
       await sendOtp({ email: form.email, purpose: "register" });
       setOtpMessage("OTP sent to your email.");
+      toast.success("OTP sent to your email");
     } catch (err) {
       setError(normalizeError(err));
+    } finally {
+      setSendingOtp(false);
     }
   }
 
@@ -112,8 +117,8 @@ export default function Register({ onHome, onSwitch }) {
               value={form.otp_code}
             />
           </label>
-          <button className="secondaryButton" disabled={!form.email} onClick={handleSendOtp} type="button">
-            Send OTP
+          <button className="secondaryButton" disabled={!form.email || sendingOtp} onClick={handleSendOtp} type="button">
+            {sendingOtp ? "Sending..." : "Send OTP"}
           </button>
         </div>
         {otpMessage && <div className="successAlert">{otpMessage}</div>}
