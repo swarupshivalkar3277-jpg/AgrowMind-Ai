@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 
@@ -7,7 +7,17 @@ import GoogleAuthButton from "../components/GoogleAuthButton";
 import { forgotPassword, sendOtp } from "../services/authService";
 
 function normalizeError(error) {
-  return error?.response?.data?.detail || error?.message || "Login failed";
+  const detail = error?.response?.data?.detail || error?.response?.data?.error;
+
+  if (typeof detail === "string") {
+    return detail;
+  }
+
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item.msg).filter(Boolean).join(", ");
+  }
+
+  return error?.message || "Login failed";
 }
 
 export default function Login({ onHome, onSwitch, startForgot = false }) {
@@ -22,6 +32,19 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sendingOtp, setSendingOtp] = useState(false);
+  const [otpCooldown, setOtpCooldown] = useState(0);
+
+  useEffect(() => {
+    if (!otpCooldown) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      setOtpCooldown((seconds) => Math.max(seconds - 1, 0));
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [otpCooldown]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -57,6 +80,7 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
     } catch (err) {
       setError(normalizeError(err));
     } finally {
+      setOtpCooldown(60);
       setSendingOtp(false);
     }
   }
@@ -106,14 +130,19 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
           <label>
             <span>Email OTP</span>
             <input
-              onChange={(event) => setOtpCode(event.target.value)}
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              maxLength="8"
+              onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
+              pattern="[0-9]{4,8}"
               placeholder="6 digit OTP"
               required
+              type="text"
               value={otpCode}
             />
           </label>
-          <button className="secondaryButton" disabled={!email || sendingOtp} onClick={() => handleSendOtp(forgotMode ? "forgot_password" : "login")} type="button">
-            {sendingOtp ? "Sending..." : "Send OTP"}
+          <button className="secondaryButton" disabled={!email || sendingOtp || otpCooldown > 0} onClick={() => handleSendOtp(forgotMode ? "forgot_password" : "login")} type="button">
+            {sendingOtp ? "Sending..." : otpCooldown > 0 ? `Wait ${otpCooldown}s` : "Send OTP"}
           </button>
         </div>
         {message && <div className="successAlert">{message}</div>}

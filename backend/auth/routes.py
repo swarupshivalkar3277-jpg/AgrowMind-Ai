@@ -1,4 +1,5 @@
 from urllib.parse import urlencode
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
@@ -25,6 +26,7 @@ from database.mongodb import db
 from utils.rate_limit import rate_limit
 
 router = APIRouter(tags=["Auth"])
+logger = logging.getLogger("agromind.auth.routes")
 
 
 def frontend_url() -> str:
@@ -65,13 +67,18 @@ def validate_registration_role(user: UserRegister) -> str:
 
 @router.post("/send-otp", dependencies=[Depends(rate_limit(5, 300))])
 async def send_otp(payload: OtpRequest):
+    logger.info("OTP request received email=%s purpose=%s", payload.email, payload.purpose)
     try:
         await create_and_send_otp(payload.email, payload.purpose)
     except PyMongoError as exc:
+        logger.exception("OTP database failure email=%s purpose=%s", payload.email, payload.purpose)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Database is not reachable. Check the backend MONGO_URL and MongoDB network access.",
         ) from exc
+    except HTTPException:
+        logger.exception("OTP request failed email=%s purpose=%s", payload.email, payload.purpose)
+        raise
     return {"success": True, "message": "OTP sent to email"}
 
 
@@ -174,6 +181,12 @@ async def forgot_password(payload: ForgotPasswordReset):
 
 @router.post("/google", response_model=TokenResponse)
 async def google_auth(payload: GoogleAuthRequest):
+    logger.info(
+        "Google auth request role=%s token_present=%s token_length=%s",
+        payload.role,
+        bool(payload.id_token),
+        len(payload.id_token or ""),
+    )
     profile = verify_google_id_token(payload.id_token)
     db_user = await upsert_google_user(profile, payload.role)
     try:
@@ -190,18 +203,31 @@ def verify_google_id_token(id_token: str) -> dict:
     if not client_id:
         raise HTTPException(status_code=503, detail="GOOGLE_CLIENT_ID is not configured")
 
-    response = requests.get(
-        "https://oauth2.googleapis.com/tokeninfo",
-        params={"id_token": id_token},
-        timeout=15,
-    )
+    try:
+        response = requests.get(
+            "https://oauth2.googleapis.com/tokeninfo",
+            params={"id_token": id_token},
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        logger.exception("Google tokeninfo request failed")
+        raise HTTPException(status_code=502, detail="Google token verification service is unreachable") from exc
+
     if response.status_code != 200:
+        logger.error("Google token rejected status=%s response_body=%s", response.status_code, response.text)
         raise HTTPException(status_code=401, detail="Invalid Google token")
 
     profile = response.json()
     if profile.get("aud") != client_id or profile.get("email_verified") != "true":
+        logger.error(
+            "Google token verification failed aud_match=%s email_verified=%s response_keys=%s",
+            profile.get("aud") == client_id,
+            profile.get("email_verified"),
+            sorted(profile.keys()),
+        )
         raise HTTPException(status_code=401, detail="Google token verification failed")
 
+    logger.info("Google token verified email=%s aud_match=True", profile.get("email"))
     return profile
 
 

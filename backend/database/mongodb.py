@@ -70,8 +70,6 @@ def normalize_mongo_url(raw_url: str | None) -> str:
 # ==========================================
 # DATABASE CONFIG
 # ==========================================
-MONGO_URL = normalize_mongo_url(os.getenv("MONGO_URL"))
-
 DB_NAME = os.getenv(
     "MONGO_DB_NAME",
     "agrowmindai"
@@ -104,6 +102,7 @@ if DNS_NAMESERVERS:
 # CONNECT TO DATABASE
 # ==========================================
 try:
+    MONGO_URL = normalize_mongo_url(os.getenv("MONGO_URL"))
 
     client_options = {
         "serverSelectionTimeoutMS": SERVER_SELECTION_TIMEOUT_MS,
@@ -152,6 +151,15 @@ except RuntimeError as exc:
     client = None
     db = UnconfiguredDatabase(reason)
 
+except PyMongoError as exc:
+
+    reason = f"MongoDB client initialization failed: {exc}"
+
+    logger.exception(reason)
+
+    client = None
+    db = UnconfiguredDatabase(reason)
+
 
 # ==========================================
 # CHECK DATABASE CONNECTION
@@ -160,12 +168,22 @@ async def check_database() -> None:
 
     if client is None:
         raise DatabaseConfigurationError(
-            "Database is not configured properly."
+            getattr(db, "reason", "Database is not configured properly.")
         )
 
     await client.admin.command("ping")
 
     logger.info("MongoDB ping successful")
+
+
+def database_status() -> dict:
+    return {
+        "configured": client is not None,
+        "database_name": DB_NAME,
+        "server_selection_timeout_ms": SERVER_SELECTION_TIMEOUT_MS,
+        "dns_nameservers_configured": bool(DNS_NAMESERVERS),
+        "reason": getattr(db, "reason", None) if client is None else None,
+    }
 
 
 # ==========================================

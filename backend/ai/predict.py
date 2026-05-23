@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import urllib.error
@@ -12,7 +13,9 @@ from PIL import Image
 
 
 tf = None
+logger = logging.getLogger("agromind.ai.predict")
 BASE_DIR = Path(__file__).resolve().parents[1]
+PROJECT_DIR = BASE_DIR.parent
 AI_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
 MODEL_DIRS = [
@@ -23,12 +26,22 @@ MODEL_DIRS = [
     TRAINING_DIR,
     AI_DIR / "models",
     BASE_DIR / "models",
+    PROJECT_DIR,
 ]
 IMG_SIZE = 224
 
 DEFAULT_CLASSES = {
     "tomato": ["early_blight", "healthy", "late_blight"],
-    "mango": ["anthracnose", "healthy", "powdery_mildew"],
+    "mango": [
+        "Bacterial Canker",
+        "Cutting Weevil",
+        "Gall Midge",
+        "Powdery Mildew",
+        "Sooty Mould",
+        "anthracnose",
+        "die back",
+        "healthy",
+    ],
     "coconut": ["bud_rot", "healthy", "leaf_rot"],
 }
 
@@ -94,6 +107,7 @@ def download_model_if_configured(crop: str) -> Path | None:
     temp_path = destination.with_suffix(".download")
 
     try:
+        logger.info("Downloading %s model from configured URL", crop)
         with urllib.request.urlopen(url, timeout=180) as response:
             with temp_path.open("wb") as output:
                 shutil.copyfileobj(response, output)
@@ -103,9 +117,11 @@ def download_model_if_configured(crop: str) -> Path | None:
             raise RuntimeError(f"Downloaded {crop} model is too small to be valid")
 
         temp_path.replace(destination)
+        logger.info("Downloaded %s model to %s size_bytes=%s", crop, destination, destination.stat().st_size)
         return destination
     except (urllib.error.URLError, OSError, RuntimeError) as exc:
         temp_path.unlink(missing_ok=True)
+        logger.exception("Model download failed crop=%s url=%s", crop, url)
         raise RuntimeError(f"Could not download {crop} model from {url}: {exc}") from exc
 
 
@@ -113,14 +129,29 @@ def ensure_configured_models() -> dict[str, str]:
     results = {}
 
     for crop in DEFAULT_CLASSES:
-        if any(path.exists() for path in candidate_model_paths(crop)):
-            results[crop] = "available"
-            continue
+        try:
+            if not any(path.exists() for path in candidate_model_paths(crop)) and configured_model_url(crop):
+                download_model_if_configured(crop)
 
-        if configured_model_url(crop):
-            downloaded_path = download_model_if_configured(crop)
-            results[crop] = f"downloaded:{downloaded_path}" if downloaded_path else "missing"
-        else:
+            model, metadata, error = load_crop_model(crop)
+            if error:
+                results[crop] = f"error:{error.get('error')}"
+                logger.error("Model startup check failed crop=%s error=%s", crop, error)
+                continue
+
+            results[crop] = f"loaded:{loaded_models[crop]['path']}"
+            logger.info(
+                "Model startup loaded crop=%s path=%s classes=%s input_shape=%s output_shape=%s",
+                crop,
+                loaded_models[crop]["path"],
+                metadata.get("class_names"),
+                getattr(model, "input_shape", None),
+                getattr(model, "output_shape", None),
+            )
+        except Exception as exc:
+            results[crop] = f"exception:{type(exc).__name__}"
+            logger.exception("Model startup exception crop=%s", crop)
+        if crop not in results:
             results[crop] = "missing"
 
     return results
@@ -142,6 +173,7 @@ def model_status() -> dict:
 
         status[crop] = {
             "available": available_path is not None and not warnings,
+            "loaded": crop in loaded_models,
             "path": str(available_path) if available_path else None,
             "size_bytes": size_bytes,
             "warnings": warnings,
@@ -159,8 +191,11 @@ def load_metadata(crop: str, model_path: Path) -> dict:
     metadata_path = metadata_path_for_model(model_path)
     if metadata_path.exists():
         with metadata_path.open("r", encoding="utf-8") as file:
-            return json.load(file)
+            metadata = json.load(file)
+            logger.info("Loaded model metadata crop=%s path=%s metadata_path=%s", crop, model_path, metadata_path)
+            return metadata
 
+    logger.warning("Model metadata missing crop=%s model_path=%s using defaults", crop, model_path)
     return {
         "crop": crop,
         "class_names": DEFAULT_CLASSES.get(crop, []),
@@ -175,6 +210,7 @@ def load_crop_model(crop: str):
         return None, None, {"error": "Invalid crop type"}
 
     model_path = model_path_for_crop(crop)
+    logger.info("Resolving model crop=%s selected_path=%s", crop, model_path)
     if not model_path.exists():
         download_model_if_configured(crop)
         model_path = model_path_for_crop(crop)
@@ -196,8 +232,10 @@ def load_crop_model(crop: str):
     if cache_entry is None or cache_entry["path"] != model_path or cache_entry["modified_at"] != modified_at:
         metadata = load_metadata(crop, model_path)
         try:
+            logger.info("Loading TensorFlow model crop=%s path=%s size_bytes=%s", crop, model_path, model_path.stat().st_size)
             model = get_tensorflow().keras.models.load_model(model_path, compile=False)
         except Exception as exc:
+            logger.exception("TensorFlow model load failed crop=%s path=%s", crop, model_path)
             return None, None, {
                 "error": f"{crop} model could not be loaded",
                 "path": str(model_path),
@@ -214,6 +252,15 @@ def load_crop_model(crop: str):
             "model": model,
             "metadata": metadata,
         }
+        logger.info(
+            "TensorFlow model cached crop=%s path=%s input_shape=%s output_shape=%s",
+            crop,
+            model_path,
+            getattr(model, "input_shape", None),
+            getattr(model, "output_shape", None),
+        )
+    else:
+        logger.debug("Using cached model crop=%s path=%s", crop, model_path)
 
     entry = loaded_models[crop]
     return entry["model"], entry["metadata"], None
@@ -231,10 +278,23 @@ def get_model_image_size(model, metadata: dict) -> tuple[int, int]:
 
 
 def image_to_batch(image_path: str | Path, size: tuple[int, int]) -> np.ndarray:
+    logger.info("Preprocessing image path=%s target_size=%s", image_path, size)
     image = Image.open(image_path).convert("RGB")
     image = image.resize(size, Image.Resampling.BILINEAR)
     array = np.asarray(image, dtype=np.float32)
     return np.expand_dims(array, axis=0)
+
+
+def apply_input_scale(batch: np.ndarray, metadata: dict) -> np.ndarray:
+    input_scale = str(metadata.get("input_scale", "model_includes_preprocessing")).lower()
+    if input_scale in {"rescale_0_1", "0_1"}:
+        logger.debug("Applying 0..1 input scaling")
+        return batch / 255.0
+    if input_scale in {"mobilenetv2_-1_1", "rescale_-1_1", "-1_1"}:
+        logger.debug("Applying MobileNetV2 -1..1 input scaling")
+        return (batch / 127.5) - 1.0
+    logger.debug("Leaving image batch unscaled because model metadata input_scale=%s", input_scale)
+    return batch
 
 
 def normalize_scores(raw_scores: np.ndarray, temperature: float) -> np.ndarray:
@@ -251,6 +311,27 @@ def normalize_scores(raw_scores: np.ndarray, temperature: float) -> np.ndarray:
     return scores.astype(np.float32)
 
 
+def class_names_for_scores(crop: str, metadata: dict, scores: np.ndarray, model) -> list[str]:
+    metadata_classes = metadata.get("class_names") or []
+    default_classes = DEFAULT_CLASSES.get(crop, [])
+    output_size = len(scores)
+
+    if len(metadata_classes) == output_size:
+        return metadata_classes
+
+    if len(default_classes) == output_size:
+        logger.warning(
+            "Metadata class count mismatch crop=%s metadata_count=%s output_size=%s model_output_shape=%s. Using built-in class mapping.",
+            crop,
+            len(metadata_classes),
+            output_size,
+            getattr(model, "output_shape", None),
+        )
+        return default_classes
+
+    return metadata_classes or default_classes
+
+
 def confidence_notes(scores: np.ndarray) -> list[str]:
     sorted_scores = np.sort(scores)[::-1]
     top_score = float(sorted_scores[0])
@@ -265,38 +346,66 @@ def confidence_notes(scores: np.ndarray) -> list[str]:
 
 
 def predict_image(image_path, model_type):
-    model, metadata, error = load_crop_model(model_type)
-    if error:
-        return error
+    try:
+        logger.info("Prediction started crop=%s image_path=%s", model_type, image_path)
+        model, metadata, error = load_crop_model(model_type)
+        if error:
+            logger.error("Prediction cannot load model crop=%s error=%s", model_type, error)
+            return error
 
-    class_names = metadata.get("class_names") or DEFAULT_CLASSES[model_type]
-    image_size = get_model_image_size(model, metadata)
-    batch = image_to_batch(image_path, image_size)
+        image_size = get_model_image_size(model, metadata)
+        batch = apply_input_scale(image_to_batch(image_path, image_size), metadata)
 
-    raw_prediction = model.predict(batch, verbose=0)[0]
-    scores = normalize_scores(raw_prediction, float(metadata.get("temperature", 1.0)))
+        logger.info(
+            "Running prediction crop=%s image_size=%s class_count=%s model_output_shape=%s",
+            model_type,
+            image_size,
+            len(metadata.get("class_names") or DEFAULT_CLASSES[model_type]),
+            getattr(model, "output_shape", None),
+        )
+        raw_prediction = model.predict(batch, verbose=0)[0]
+        scores = normalize_scores(raw_prediction, float(metadata.get("temperature", 1.0)))
+        class_names = class_names_for_scores(model_type, metadata, scores, model)
 
-    if len(class_names) != len(scores):
+        if len(class_names) != len(scores):
+            error = {
+                "error": "Model output size does not match class metadata",
+                "classes": class_names,
+                "class_count": int(len(class_names)),
+                "output_size": int(len(scores)),
+                "model_output_shape": str(getattr(model, "output_shape", None)),
+            }
+            logger.error("Class lookup failed crop=%s error=%s", model_type, error)
+            return error
+
+        predicted_index = int(np.argmax(scores))
+        predicted_class = class_names[predicted_index]
+        confidence = float(scores[predicted_index] * 100)
+        logger.info(
+            "Prediction complete crop=%s predicted_index=%s disease=%s confidence=%.2f",
+            model_type,
+            predicted_index,
+            predicted_class,
+            confidence,
+        )
+
         return {
-            "error": "Model output size does not match class metadata",
-            "classes": class_names,
-            "output_size": int(len(scores)),
+            "disease": predicted_class,
+            "confidence": round(confidence, 2),
+            "notes": confidence_notes(scores),
+            "all_scores": {
+                class_names[index]: round(float(scores[index] * 100), 2)
+                for index in range(len(class_names))
+            },
+            "model_file": str(loaded_models[model_type]["path"]),
         }
-
-    predicted_index = int(np.argmax(scores))
-    predicted_class = class_names[predicted_index]
-    confidence = float(scores[predicted_index] * 100)
-
-    return {
-        "disease": predicted_class,
-        "confidence": round(confidence, 2),
-        "notes": confidence_notes(scores),
-        "all_scores": {
-            class_names[index]: round(float(scores[index] * 100), 2)
-            for index in range(len(class_names))
-        },
-        "model_file": str(loaded_models[model_type]["path"]),
-    }
+    except Exception as exc:
+        logger.exception("Prediction exception crop=%s image_path=%s", model_type, image_path)
+        return {
+            "error": "Prediction failed",
+            "exception_type": type(exc).__name__,
+            "message": str(exc),
+        }
 
 
 def find_last_conv_layer(model: tf.keras.Model) -> str | None:
@@ -309,46 +418,58 @@ def find_last_conv_layer(model: tf.keras.Model) -> str | None:
 
 
 def create_gradcam(image_path, model_type, output_path=None):
-    model, metadata, error = load_crop_model(model_type)
-    if error:
-        return error
+    try:
+        logger.info("Grad-CAM started crop=%s image_path=%s", model_type, image_path)
+        model, metadata, error = load_crop_model(model_type)
+        if error:
+            logger.error("Grad-CAM cannot load model crop=%s error=%s", model_type, error)
+            return error
 
-    image_size = get_model_image_size(model, metadata)
-    batch = image_to_batch(image_path, image_size)
-    last_conv_layer_name = find_last_conv_layer(model)
-    tensorflow = get_tensorflow()
+        image_size = get_model_image_size(model, metadata)
+        batch = apply_input_scale(image_to_batch(image_path, image_size), metadata)
+        last_conv_layer_name = find_last_conv_layer(model)
+        tensorflow = get_tensorflow()
 
-    if last_conv_layer_name is None:
-        return {"error": "No Conv2D layer found for Grad-CAM"}
+        if last_conv_layer_name is None:
+            logger.error("Grad-CAM failed crop=%s reason=no_conv2d_layer", model_type)
+            return {"error": "No Conv2D layer found for Grad-CAM"}
 
-    grad_model = tensorflow.keras.Model(
-        model.inputs,
-        [model.get_layer(last_conv_layer_name).output, model.output],
-    )
+        grad_model = tensorflow.keras.Model(
+            model.inputs,
+            [model.get_layer(last_conv_layer_name).output, model.output],
+        )
 
-    with tensorflow.GradientTape() as tape:
-        conv_outputs, predictions = grad_model(batch)
-        predicted_index = tensorflow.argmax(predictions[0])
-        class_score = predictions[:, predicted_index]
+        with tensorflow.GradientTape() as tape:
+            conv_outputs, predictions = grad_model(batch)
+            predicted_index = tensorflow.argmax(predictions[0])
+            class_score = predictions[:, predicted_index]
 
-    grads = tape.gradient(class_score, conv_outputs)
-    pooled_grads = tensorflow.reduce_mean(grads, axis=(0, 1, 2))
-    heatmap = tensorflow.reduce_sum(conv_outputs[0] * pooled_grads, axis=-1)
-    heatmap = tensorflow.maximum(heatmap, 0) / tensorflow.maximum(tensorflow.reduce_max(heatmap), 1e-8)
-    heatmap = heatmap.numpy()
+        grads = tape.gradient(class_score, conv_outputs)
+        pooled_grads = tensorflow.reduce_mean(grads, axis=(0, 1, 2))
+        heatmap = tensorflow.reduce_sum(conv_outputs[0] * pooled_grads, axis=-1)
+        heatmap = tensorflow.maximum(heatmap, 0) / tensorflow.maximum(tensorflow.reduce_max(heatmap), 1e-8)
+        heatmap = heatmap.numpy()
 
-    original = Image.open(image_path).convert("RGB").resize(image_size, Image.Resampling.BILINEAR)
-    heatmap_image = Image.fromarray(np.uint8(255 * heatmap)).resize(image_size, Image.Resampling.BILINEAR)
-    heatmap_image = heatmap_image.convert("L")
+        original = Image.open(image_path).convert("RGB").resize(image_size, Image.Resampling.BILINEAR)
+        heatmap_image = Image.fromarray(np.uint8(255 * heatmap)).resize(image_size, Image.Resampling.BILINEAR)
+        heatmap_image = heatmap_image.convert("L")
 
-    red_overlay = Image.new("RGBA", image_size, (255, 0, 0, 0))
-    red_overlay.putalpha(heatmap_image.point(lambda value: int(value * 0.45)))
-    cam = Image.alpha_composite(original.convert("RGBA"), red_overlay).convert("RGB")
+        red_overlay = Image.new("RGBA", image_size, (255, 0, 0, 0))
+        red_overlay.putalpha(heatmap_image.point(lambda value: int(value * 0.45)))
+        cam = Image.alpha_composite(original.convert("RGBA"), red_overlay).convert("RGB")
 
-    if output_path is None:
-        output_dir = BASE_DIR / "results"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"gradcam_{Path(image_path).stem}.jpg"
+        if output_path is None:
+            output_dir = BASE_DIR / "results"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"gradcam_{Path(image_path).stem}.jpg"
 
-    cam.save(output_path)
-    return {"gradcam_image": str(output_path), "layer": last_conv_layer_name}
+        cam.save(output_path)
+        logger.info("Grad-CAM complete crop=%s layer=%s output_path=%s", model_type, last_conv_layer_name, output_path)
+        return {"gradcam_image": str(output_path), "layer": last_conv_layer_name}
+    except Exception as exc:
+        logger.exception("Grad-CAM exception crop=%s image_path=%s", model_type, image_path)
+        return {
+            "error": "Grad-CAM failed",
+            "exception_type": type(exc).__name__,
+            "message": str(exc),
+        }

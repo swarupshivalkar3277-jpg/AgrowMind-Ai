@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 
 import { useAuth } from "../context/AuthContext";
@@ -33,6 +33,19 @@ export default function Register({ onHome, onSwitch }) {
   const [submitting, setSubmitting] = useState(false);
   const [sendingOtp, setSendingOtp] = useState(false);
   const [otpMessage, setOtpMessage] = useState("");
+  const [otpCooldown, setOtpCooldown] = useState(0);
+
+  useEffect(() => {
+    if (!otpCooldown) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      setOtpCooldown((seconds) => Math.max(seconds - 1, 0));
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [otpCooldown]);
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -49,6 +62,7 @@ export default function Register({ onHome, onSwitch }) {
     } catch (err) {
       setError(normalizeError(err));
     } finally {
+      setOtpCooldown(60);
       setSendingOtp(false);
     }
   }
@@ -112,14 +126,19 @@ export default function Register({ onHome, onSwitch }) {
           <label>
             <span>Email OTP</span>
             <input
-              onChange={(event) => updateField("otp_code", event.target.value)}
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              maxLength="8"
+              onChange={(event) => updateField("otp_code", event.target.value.replace(/\D/g, "").slice(0, 8))}
+              pattern="[0-9]{4,8}"
               placeholder="6 digit OTP"
               required
+              type="text"
               value={form.otp_code}
             />
           </label>
-          <button className="secondaryButton" disabled={!form.email || sendingOtp} onClick={handleSendOtp} type="button">
-            {sendingOtp ? "Sending..." : "Send OTP"}
+          <button className="secondaryButton" disabled={!form.email || sendingOtp || otpCooldown > 0} onClick={handleSendOtp} type="button">
+            {sendingOtp ? "Sending..." : otpCooldown > 0 ? `Wait ${otpCooldown}s` : "Send OTP"}
           </button>
         </div>
         {otpMessage && <div className="successAlert">{otpMessage}</div>}

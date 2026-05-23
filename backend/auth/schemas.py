@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
 
 class UserRegister(BaseModel):
@@ -28,7 +28,14 @@ class ForgotPasswordReset(BaseModel):
 
 
 class GoogleAuthRequest(BaseModel):
-    id_token: str
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    id_token: str = Field(
+        ...,
+        min_length=10,
+        validation_alias=AliasChoices("id_token", "credential"),
+        description="Google ID token. Frontend Google Identity Services calls this response.credential.",
+    )
     role: str = Field(default="farmer", pattern="^(farmer|admin)$")
 
 

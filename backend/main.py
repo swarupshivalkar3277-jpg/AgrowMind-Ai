@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from fastapi import (
     FastAPI,
@@ -26,6 +27,7 @@ from pymongo.errors import PyMongoError
 from auth.routes import router as auth_router
 from auth.deps import get_current_user
 from auth.models import user_public
+from auth.otp import email_config_status
 from routes.admin import router as admin_router
 from routes.marketplace import router as marketplace_router, recommended_products
 
@@ -44,7 +46,7 @@ from ai.recommendations import enrich_prediction
 # =========================
 # DATABASE
 # =========================
-from database.mongodb import check_database, db, ensure_indexes
+from database.mongodb import check_database, database_status as mongodb_status, db, ensure_indexes
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -135,6 +137,7 @@ if ENVIRONMENT != "production":
     ]
 ALLOWED_ORIGINS = sorted(set(
     DEFAULT_ORIGINS
+    + ["https://agrowmindai.vercel.app"]
     + _csv_env("FRONTEND_URL")
     + ([] if ENVIRONMENT == "production" else _csv_env("CORS_ORIGINS") + _csv_env("FRONTEND_ORIGINS") + _csv_env("FRONTEND_ORIGIN"))
 ))
@@ -148,6 +151,10 @@ TRUSTED_HOSTS = [
 ]
 if not TRUSTED_HOSTS:
     TRUSTED_HOSTS = ["localhost", "127.0.0.1", "*.onrender.com"]
+for url_value in [os.getenv("BACKEND_URL", ""), os.getenv("FRONTEND_URL", "")]:
+    parsed = urlparse(url_value)
+    if parsed.hostname and parsed.hostname not in TRUSTED_HOSTS:
+        TRUSTED_HOSTS.append(parsed.hostname)
 
 
 app.add_middleware(
@@ -277,6 +284,12 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.warning(
+        "Validation error path=%s method=%s errors=%s",
+        request.url.path,
+        request.method,
+        exc.errors(),
+    )
     return JSONResponse(
         status_code=422,
         content={
@@ -288,11 +301,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception path=%s method=%s", request.url.path, request.method)
     return JSONResponse(
         status_code=500,
         content={
             "success": False,
-            "error": str(exc)
+            "error": "Internal server error"
         }
     )
 
@@ -315,12 +329,15 @@ async def health():
 
     models = model_status()
     database_status = "connected"
+    database_details = mongodb_status()
     missing_env = missing_required_env_vars()
 
     try:
         await check_database()
-    except Exception:
+    except Exception as exc:
+        logger.exception("Health database check failed")
         database_status = "unreachable"
+        database_details["reason"] = str(exc)
 
     missing_models = [
         crop
@@ -333,6 +350,8 @@ async def health():
         "success": True,
         "status": "healthy" if not missing_models and database_status == "connected" else "degraded",
         "database": database_status,
+        "database_details": database_details,
+        "email": email_config_status(),
         "models": models,
         "missing_models": missing_models,
         "missing_env": missing_env,
@@ -359,9 +378,10 @@ async def detect(
         }
 
     except Exception as e:
+        logger.exception("Detection failed file_path=%s filename=%s", file_path, file.filename)
         raise HTTPException(
             status_code=503,
-            detail=f"Detection failed: {str(e)}"
+            detail="Detection failed. Check backend logs for details."
         )
 
 # =========================
@@ -379,12 +399,19 @@ async def predict_crop(
     file_path = save_upload(file)
 
     try:
+        logger.info("Prediction request crop=%s user=%s file_path=%s filename=%s", crop, user.get("email"), file_path, file.filename)
         result = predict_image(file_path, crop)
 
         if "error" in result:
+            logger.error("Prediction returned error crop=%s result=%s", crop, result)
             raise HTTPException(
                 status_code=503,
-                detail=result
+                detail={
+                    "error": "Prediction service unavailable",
+                    "reason": result.get("error"),
+                    "exception_type": result.get("exception_type"),
+                    "message": result.get("message"),
+                }
             )
 
         result = enrich_prediction(crop, result)
@@ -417,14 +444,16 @@ async def predict_crop(
     except HTTPException:
         raise
     except PyMongoError as e:
+        logger.exception("Prediction database failure crop=%s user=%s", crop, user.get("email"))
         raise HTTPException(
             status_code=503,
-            detail=f"Database is not reachable. Check the backend MONGO_URL and MongoDB network access: {str(e)}"
+            detail="Database is not reachable. Check the backend MONGO_URL and MongoDB network access."
         )
     except Exception as e:
+        logger.exception("Prediction failed crop=%s user=%s file_path=%s", crop, user.get("email"), file_path)
         raise HTTPException(
             status_code=500,
-            detail=f"Prediction failed: {str(e)}"
+            detail="Prediction failed. Check backend logs for details."
         )
 
 # =========================
