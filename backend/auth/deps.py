@@ -53,12 +53,18 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(securit
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    if user.get("blocked"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account is blocked. Contact AgroMind AI support.",
+        )
+
     return user
 
 
 def require_role(*allowed_roles: str):
     async def role_checker(current_user=Depends(get_current_user)):
-        if current_user.get("role", "user") not in allowed_roles:
+        if current_user.get("role", "farmer") not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions",

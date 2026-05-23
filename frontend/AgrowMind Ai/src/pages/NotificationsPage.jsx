@@ -1,12 +1,12 @@
 export default function NotificationsPage() {
-  const items = ["Prediction completed successfully", "Razorpay order verification enabled", "Seller inventory needs stock review"];
+  const items = ["Prediction completed successfully", "Razorpay order verification enabled", "Admin inventory needs stock review"];
   return (
     <main className="pageStack">
       <section className="pageHero compactHero">
         <div>
           <span className="eyebrowText">Notifications</span>
           <h1>Operational alerts</h1>
-          <p>AI, marketplace, order, seller, and payment updates appear here.</p>
+          <p>AI, marketplace, order, inventory, and payment updates appear here.</p>
         </div>
       </section>
       <section className="adminList">

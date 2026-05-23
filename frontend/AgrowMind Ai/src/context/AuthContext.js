@@ -77,7 +77,7 @@ export function AuthProvider({ children }) {
     return data;
   }
 
-  async function loginWithGoogle(idToken, role = "user") {
+  async function loginWithGoogle(idToken, role = "farmer") {
     const { data } = await googleAuth({ id_token: idToken, role });
     localStorage.setItem("token", data.access_token);
     setToken(data.access_token);

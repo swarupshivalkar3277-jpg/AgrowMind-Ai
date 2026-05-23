@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 
-def build_user_document(name: str, email: str, hashed_password: str, role: str = "user") -> dict:
+def build_user_document(name: str, email: str, hashed_password: str, role: str = "farmer") -> dict:
     now = datetime.now(timezone.utc)
     return {
         "name": name,
@@ -18,5 +18,5 @@ def user_public(user: dict) -> dict:
         "id": str(user["_id"]),
         "name": user["name"],
         "email": user["email"],
-        "role": user.get("role", "user"),
+        "role": user.get("role", "farmer"),
     }

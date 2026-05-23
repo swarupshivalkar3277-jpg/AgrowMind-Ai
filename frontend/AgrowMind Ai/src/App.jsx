@@ -21,8 +21,6 @@ import Orders from "./pages/Orders";
 import PaymentStatus from "./pages/PaymentStatus";
 import ProductDetails from "./pages/ProductDetails";
 import Register from "./pages/Register";
-import SellerDashboard from "./pages/SellerDashboard";
-import SellProductsPage from "./pages/SellProductsPage";
 import SettingsPage from "./pages/SettingsPage";
 import WishlistPage from "./pages/WishlistPage";
 
@@ -36,7 +34,7 @@ function LoadingScreen({ label = "Loading secure workspace..." }) {
   );
 }
 
-function ProtectedRoute({ children, adminOnly = false, sellerOnly = false }) {
+function ProtectedRoute({ children, adminOnly = false }) {
   const { isAuthenticated, loading, user } = useAuth();
   const location = useLocation();
 
@@ -50,10 +48,6 @@ function ProtectedRoute({ children, adminOnly = false, sellerOnly = false }) {
 
   if (adminOnly && user?.role !== "admin") {
     return <Navigate replace to="/dashboard" />;
-  }
-
-  if (sellerOnly && !["admin", "farmer", "seller"].includes(user?.role)) {
-    return <Navigate replace to="/marketplace" />;
   }
 
   return children;
@@ -105,8 +99,6 @@ function AppRoutes() {
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/payment/success" element={<PaymentStatus success />} />
           <Route path="/payment/failed" element={<PaymentStatus success={false} />} />
-          <Route path="/sell" element={<ProtectedRoute sellerOnly><SellProductsPage /></ProtectedRoute>} />
-          <Route path="/seller" element={<ProtectedRoute sellerOnly><SellerDashboard /></ProtectedRoute>} />
           <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
         </Route>
       </Routes>

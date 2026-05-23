@@ -28,12 +28,6 @@ const commonLinks = [
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
-const sellerLinks = [
-  { to: "/sell", label: "Sell Products", icon: Boxes },
-  { to: "/seller", label: "Inventory", icon: Store },
-  { to: "/analytics", label: "Analytics", icon: BarChart3 },
-];
-
 const adminLinks = [
   { to: "/admin", label: "Admin Dashboard", icon: ShieldCheck },
   { to: "/admin?tab=users", label: "User Management", icon: UserCog },
@@ -54,7 +48,6 @@ function SidebarLink({ item, onClose }) {
 
 export default function Sidebar({ open, onClose }) {
   const { logout, user } = useAuth();
-  const canSell = ["admin", "farmer", "seller"].includes(user?.role);
   const isAdmin = user?.role === "admin";
 
   return (
@@ -73,8 +66,6 @@ export default function Sidebar({ open, onClose }) {
         </div>
         <nav className="sidebarNav">
           {commonLinks.map((item) => <SidebarLink item={item} key={item.label} onClose={onClose} />)}
-          {canSell && <p className="sidebarGroup">Seller</p>}
-          {canSell && sellerLinks.map((item) => <SidebarLink item={item} key={item.label} onClose={onClose} />)}
           {isAdmin && <p className="sidebarGroup">Admin</p>}
           {isAdmin && adminLinks.map((item) => <SidebarLink item={item} key={item.label} onClose={onClose} />)}
         </nav>

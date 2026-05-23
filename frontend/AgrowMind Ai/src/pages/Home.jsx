@@ -18,7 +18,7 @@ const features = [
   {
     icon: ShieldCheck,
     title: "Secure farmer accounts",
-    text: "OTP, Google sign-in, JWT validation, saved reports, order tracking, and role-aware seller access keep workflows protected.",
+    text: "OTP, Google sign-in, JWT validation, saved reports, order tracking, and admin-only operations keep workflows protected.",
   },
 ];
 

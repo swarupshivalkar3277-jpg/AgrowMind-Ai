@@ -198,6 +198,8 @@ async def ensure_indexes() -> None:
     # Separate indexes for array fields
     # ======================================
     await db.products.create_index("category")
+    await db.products.create_index("stock")
+    await db.products.create_index("created_at")
     await db.products.create_index("crop_type")
     await db.products.create_index("disease_tags")
     await db.products.create_index("name")
@@ -217,6 +219,8 @@ async def ensure_indexes() -> None:
         ("user_id", 1),
         ("created_at", -1)
     ])
+    await db.orders.create_index("order_status")
+    await db.orders.create_index("created_at")
 
     # ======================================
     # PAYMENTS
@@ -225,6 +229,8 @@ async def ensure_indexes() -> None:
         ("user_id", 1),
         ("created_at", -1)
     ])
+    await db.payments.create_index("payment_id", unique=True, sparse=True)
+    await db.payments.create_index("razorpay_order_id", unique=True, sparse=True)
 
     # ======================================
     # WISHLIST

@@ -19,9 +19,6 @@ export default function MarketplaceNav({ darkMode, onToggleTheme }) {
       <div className="navActions">
         <NavLink to="/dashboard">Dashboard</NavLink>
         <NavLink to="/marketplace">Marketplace</NavLink>
-        {(user?.role === "farmer" || user?.role === "seller" || user?.role === "admin") && (
-          <NavLink to="/sell">Sell</NavLink>
-        )}
         <NavLink to="/orders">My Orders</NavLink>
         {user?.role === "admin" && <NavLink to="/admin">Admin</NavLink>}
         <button className="cartButton" onClick={() => setDrawerOpen(true)} type="button">

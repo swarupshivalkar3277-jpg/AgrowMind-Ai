@@ -22,6 +22,7 @@ from auth.schemas import (
 )
 from auth.utils import create_access_token, hash_password, verify_password
 from database.mongodb import db
+from utils.rate_limit import rate_limit
 
 router = APIRouter(tags=["Auth"])
 
@@ -38,12 +39,31 @@ def token_for_user(db_user: dict) -> dict:
     token = create_access_token({
         "sub": str(db_user["_id"]),
         "email": db_user["email"],
-        "role": db_user.get("role", "user"),
+        "role": db_user.get("role", "farmer"),
     })
     return {"access_token": token, "token_type": "bearer"}
 
 
-@router.post("/send-otp")
+def validate_registration_role(user: UserRegister) -> str:
+    role = user.role or "farmer"
+    if role != "admin":
+        return "farmer"
+
+    expected_secret = os.getenv("ADMIN_REGISTER_SECRET")
+    if not expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ADMIN_REGISTER_SECRET is not configured on the backend.",
+        )
+    if user.admin_secret != expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid admin registration secret",
+        )
+    return "admin"
+
+
+@router.post("/send-otp", dependencies=[Depends(rate_limit(5, 300))])
 async def send_otp(payload: OtpRequest):
     try:
         await create_and_send_otp(payload.email, payload.purpose)
@@ -55,7 +75,7 @@ async def send_otp(payload: OtpRequest):
     return {"success": True, "message": "OTP sent to email"}
 
 
-@router.post("/register", status_code=status.HTTP_201_CREATED)
+@router.post("/register", status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit(5, 300))])
 async def register(user: UserRegister):
     email = user.email.lower()
 
@@ -74,12 +94,13 @@ async def register(user: UserRegister):
         )
 
     await verify_otp(email, "register", user.otp_code)
+    role = validate_registration_role(user)
 
     user_data = build_user_document(
         name=user.name,
         email=email,
         hashed_password=hash_password(user.password),
-        role=user.role,
+        role=role,
     )
     try:
         result = await db.users.insert_one(user_data)
@@ -101,7 +122,7 @@ async def register(user: UserRegister):
     return {"success": True, "user": user_public(created), **token}
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=TokenResponse, dependencies=[Depends(rate_limit(10, 300))])
 async def login(user: UserLogin):
     email = user.email.lower()
 
@@ -117,6 +138,11 @@ async def login(user: UserLogin):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
+        )
+    if db_user.get("blocked"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account is blocked. Contact AgroMind AI support.",
         )
 
     await verify_otp(email, "login", user.otp_code)
@@ -184,11 +210,12 @@ async def upsert_google_user(profile: dict, role: str) -> dict:
     try:
         db_user = await db.users.find_one({"email": email})
         if not db_user:
+            requested_role = role if role == "farmer" else "farmer"
             now_user = build_user_document(
                 name=profile.get("name") or email.split("@")[0],
                 email=email,
                 hashed_password=hash_password(os.urandom(24).hex()),
-                role=role,
+                role=requested_role,
             )
             now_user["auth_provider"] = "google"
             result = await db.users.insert_one(now_user)
@@ -244,7 +271,7 @@ async def google_callback(
         return RedirectResponse(f"{redirect_base}?{urlencode({'error': 'Google did not return an ID token'})}")
 
     profile = verify_google_id_token(id_token)
-    db_user = await upsert_google_user(profile, "user")
+    db_user = await upsert_google_user(profile, "farmer")
     token = token_for_user(db_user)["access_token"]
 
     return RedirectResponse(f"{frontend_url()}/dashboard?{urlencode({'token': token})}")

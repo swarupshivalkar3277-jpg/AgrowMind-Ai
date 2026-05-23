@@ -12,6 +12,10 @@ export default function ProductCard({ product }) {
   const navigate = useNavigate();
 
   async function handleAdd() {
+    if (product.stock <= 0) {
+      toast.error("This product is out of stock");
+      return;
+    }
     if (!isAuthenticated) {
       toast.error("Login required to buy products");
       navigate("/login");
@@ -41,14 +45,15 @@ export default function ProductCard({ product }) {
           <span className="productCategory">{product.category}</span>
           <h3>{product.name}</h3>
           <p>{product.description}</p>
+          {product.stock <= 0 && <span className="alert">Out of Stock</span>}
         </div>
         <div className="productMeta">
           <strong>Rs. {product.price}</strong>
           <span><Star size={15} fill="currentColor" /> {product.rating}</span>
         </div>
         <div className="productActions">
-          <button onClick={handleAdd} type="button">
-            <ShoppingCart size={17} /> {isAuthenticated ? "Add" : "Login Required to Buy"}
+          <button disabled={product.stock <= 0} onClick={handleAdd} type="button">
+            <ShoppingCart size={17} /> {product.stock <= 0 ? "Out of Stock" : isAuthenticated ? "Add" : "Login Required to Buy"}
           </button>
           <button className="iconTextButton" onClick={handleWishlist} type="button"><Heart size={17} /> Save</button>
         </div>

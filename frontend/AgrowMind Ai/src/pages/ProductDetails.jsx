@@ -20,6 +20,10 @@ export default function ProductDetails() {
   }, [id]);
 
   async function addAndMaybeCheckout(goCheckout = false) {
+    if (product.stock <= 0 || quantity > product.stock) {
+      toast.error("Requested quantity is not available");
+      return;
+    }
     if (!isAuthenticated) {
       toast.error("Please login to buy products.");
       navigate("/login");
@@ -55,23 +59,24 @@ export default function ProductDetails() {
             <strong>Rs. {product.price}</strong>
             <span>Rating {product.rating}/5</span>
             <span>{product.stock} in stock</span>
-            <span>Seller: {product.seller_name}</span>
+            <span>Store: {product.seller_name}</span>
           </div>
+          {product.stock <= 0 && <div className="alert">Out of Stock</div>}
           <label className="quantityInput">
             <span>Quantity</span>
-            <input min="1" onChange={(event) => setQuantity(Number(event.target.value))} type="number" value={quantity} />
+            <input max={Math.max(product.stock, 1)} min="1" onChange={(event) => setQuantity(Number(event.target.value))} type="number" value={quantity} />
           </label>
           <div className="heroActions">
-            <button className="primaryButton" onClick={() => addAndMaybeCheckout(false)} type="button">
-              {isAuthenticated ? "Add to Cart" : "Login Required to Buy"}
+            <button className="primaryButton" disabled={product.stock <= 0} onClick={() => addAndMaybeCheckout(false)} type="button">
+              {product.stock <= 0 ? "Out of Stock" : isAuthenticated ? "Add to Cart" : "Login Required to Buy"}
             </button>
-            <button className="secondaryButton" onClick={() => addAndMaybeCheckout(true)} type="button">
-              {isAuthenticated ? "Buy Now" : "Login to Checkout"}
+            <button className="secondaryButton" disabled={product.stock <= 0} onClick={() => addAndMaybeCheckout(true)} type="button">
+              {product.stock <= 0 ? "Out of Stock" : isAuthenticated ? "Buy Now" : "Login to Checkout"}
             </button>
           </div>
           <section className="reviewsBox">
             <h2>Reviews</h2>
-            <p>Verified buyer reviews, seller questions, and related products will appear here.</p>
+            <p>Verified customer reviews, product questions, and related products will appear here.</p>
           </section>
         </div>
       </section>

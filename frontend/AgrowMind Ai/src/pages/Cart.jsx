@@ -4,6 +4,7 @@ import { useCart } from "../context/CartContext";
 
 export default function Cart() {
   const { cart, remove, update } = useCart();
+  const hasInvalidItems = cart.items.some((item) => item.product.stock <= 0 || item.quantity > item.product.stock);
 
   return (
     <main className="pageStack">
@@ -20,10 +21,12 @@ export default function Cart() {
                 <div>
                   <strong>{item.product.name}</strong>
                   <span>Rs. {item.product.price} each</span>
+                  {item.product.stock <= 0 && <span className="alert">Out of Stock</span>}
+                  {item.quantity > item.product.stock && item.product.stock > 0 && <span className="alert">Only {item.product.stock} available</span>}
                   <div className="quantityControl">
                     <button onClick={() => update(item.product.id, item.quantity - 1)} type="button">-</button>
                     <span>{item.quantity}</span>
-                    <button onClick={() => update(item.product.id, item.quantity + 1)} type="button">+</button>
+                    <button disabled={item.quantity >= item.product.stock} onClick={() => update(item.product.id, item.quantity + 1)} type="button">+</button>
                   </div>
                 </div>
                 <strong>Rs. {item.line_total}</strong>
@@ -38,7 +41,7 @@ export default function Cart() {
             <span>Tax Rs. {cart.tax}</span>
             <span>Delivery Rs. {cart.shipping}</span>
             <strong>Total Rs. {cart.total}</strong>
-            <Link className="primaryButton" to="/checkout">Checkout</Link>
+            {hasInvalidItems ? <span className="alert">Fix unavailable items before checkout.</span> : <Link className="primaryButton" to="/checkout">Checkout</Link>}
           </aside>
         </div>
       </section>

@@ -25,8 +25,9 @@ export default function Register({ onHome, onSwitch }) {
     name: "",
     email: "",
     password: "",
-    role: "user",
+    role: "farmer",
     otp_code: "",
+    admin_secret: "",
   });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -125,13 +126,22 @@ export default function Register({ onHome, onSwitch }) {
         <label>
           <span>Role</span>
           <select onChange={(event) => updateField("role", event.target.value)} value={form.role}>
-            <option value="user">User</option>
             <option value="farmer">Farmer</option>
-            <option value="seller">Seller</option>
-            <option value="buyer">Buyer</option>
             <option value="admin">Admin</option>
           </select>
         </label>
+        {form.role === "admin" && (
+          <label>
+            <span>Admin secret</span>
+            <input
+              autoComplete="off"
+              onChange={(event) => updateField("admin_secret", event.target.value)}
+              required
+              type="password"
+              value={form.admin_secret}
+            />
+          </label>
+        )}
         {error && <div className="alert">{error}</div>}
         <button disabled={submitting} type="submit">
           {submitting ? "Creating..." : "Register"}

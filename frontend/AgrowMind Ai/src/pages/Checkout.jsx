@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import { useCart } from "../context/CartContext";
-import { checkoutCart, createRazorpayOrder } from "../services/authService";
+import { checkoutCart, createRazorpayOrder, verifyRazorpayPayment } from "../services/authService";
 
 function loadRazorpayScript() {
   return new Promise((resolve) => {
@@ -47,29 +47,28 @@ export default function Checkout() {
         const ready = await loadRazorpayScript();
         if (!ready) throw new Error("Could not load Razorpay checkout.");
 
-        const { data: orderData } = await createRazorpayOrder();
-        const razorpayOrder = orderData.razorpay_order;
+        const { data: orderData } = await createRazorpayOrder({ ...form, payment_method: "razorpay" });
+        const payment = orderData.data || {};
 
         await new Promise((resolve, reject) => {
           const checkout = new window.Razorpay({
-            key: orderData.key_id,
-            amount: razorpayOrder.amount,
-            currency: razorpayOrder.currency,
+            key: payment.razorpay_key,
+            amount: payment.amount,
+            currency: payment.currency,
             name: "AgroMind AI Marketplace",
             description: "Agriculture product order",
-            order_id: razorpayOrder.id,
+            order_id: payment.razorpay_order_id,
             prefill: { name: form.full_name, contact: form.mobile },
             handler: async (response) => {
               try {
-                const { data } = await checkoutCart({
-                  ...form,
+                const { data } = await verifyRazorpayPayment({
                   razorpay_order_id: response.razorpay_order_id,
                   razorpay_payment_id: response.razorpay_payment_id,
                   razorpay_signature: response.razorpay_signature,
                 });
                 await refreshCart();
                 toast.success("Payment verified and order created");
-                navigate(`/payment/success?order=${data.order.id}`);
+                navigate(`/payment/success?order=${data.data?.order?.id || data.order?.id || ""}`);
                 resolve();
               } catch (err) {
                 reject(err);
@@ -117,11 +116,19 @@ export default function Checkout() {
             </select>
           </label>
           {error && <div className="alert">{error}</div>}
-          <button disabled={loading || cart.items.length === 0} type="submit">{loading ? "Processing..." : "Place Order"}</button>
+          <button disabled={loading || cart.items.length === 0 || cart.items.some((item) => item.product.stock <= 0 || item.quantity > item.product.stock)} type="submit">
+            {loading ? "Processing..." : "Place Order"}
+          </button>
         </form>
         <aside className="panel orderSummary">
           <h2>Order Summary</h2>
-          {cart.items.map((item) => <span key={item.product.id}>{item.product.name} x {item.quantity} - Rs. {item.line_total}</span>)}
+          {cart.items.length === 0 && <span>Your cart is empty.</span>}
+          {cart.items.map((item) => (
+            <span key={item.product.id}>
+              {item.product.name} x {item.quantity} - Rs. {item.line_total}
+              {item.product.stock <= 0 ? " (Out of Stock)" : item.quantity > item.product.stock ? " (Stock unavailable)" : ""}
+            </span>
+          ))}
           <span>Tax Rs. {cart.tax}</span>
           <span>Shipping Rs. {cart.shipping}</span>
           <strong>Total Rs. {cart.total}</strong>

@@ -14,8 +14,10 @@ from fastapi import (
     Request,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from pymongo.errors import PyMongoError
 
 # =========================
@@ -24,6 +26,7 @@ from pymongo.errors import PyMongoError
 from auth.routes import router as auth_router
 from auth.deps import get_current_user
 from auth.models import user_public
+from routes.admin import router as admin_router
 from routes.marketplace import router as marketplace_router, recommended_products
 
 # =========================
@@ -49,6 +52,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger("agromind.api")
 
+REQUIRED_ENV_VARS = [
+    "MONGO_URL",
+    "JWT_SECRET",
+    "RAZORPAY_KEY_ID",
+    "RAZORPAY_KEY_SECRET",
+    "RESEND_API_KEY",
+    "EMAIL_FROM",
+    "ADMIN_REGISTER_SECRET",
+]
+
+
+def missing_required_env_vars() -> list[str]:
+    return [name for name in REQUIRED_ENV_VARS if not os.getenv(name)]
+
 # =========================
 # APP
 # =========================
@@ -67,6 +84,13 @@ async def startup_event():
     logger.info("PORT=%s", os.getenv("PORT", "8000"))
     logger.info("Allowed CORS origins=%s", ALLOWED_ORIGINS)
     logger.info("Registered routes=%s", sorted({route.path for route in app.routes}))
+
+    missing_env = missing_required_env_vars()
+    if missing_env:
+        message = f"Missing required environment variables: {', '.join(missing_env)}"
+        if ENVIRONMENT == "production":
+            raise RuntimeError(message)
+        logger.warning("%s. Local development will start, but related features may fail.", message)
 
     try:
         await ensure_indexes()
@@ -100,31 +124,36 @@ def _csv_env(name: str) -> list[str]:
     ]
 
 
-DEFAULT_ORIGINS = [
-    # Production
-    "https://agrowmindai.vercel.app",
-
-    # Localhost
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-
-    # LAN testing
-    "http://10.84.46.30:5173",
-
-    # Optional extra ports
-    "http://localhost:5175",
-    "http://127.0.0.1:5175",
-    "http://10.84.46.30:5175",
-]
+ENVIRONMENT = os.getenv("ENVIRONMENT", os.getenv("ENV", "development")).lower()
+DEFAULT_ORIGINS = []
+if ENVIRONMENT != "production":
+    DEFAULT_ORIGINS = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5175",
+        "http://127.0.0.1:5175",
+    ]
 ALLOWED_ORIGINS = sorted(set(
     DEFAULT_ORIGINS
-    + _csv_env("CORS_ORIGINS")
-    + _csv_env("FRONTEND_ORIGINS")
-    + _csv_env("FRONTEND_ORIGIN")
+    + _csv_env("FRONTEND_URL")
+    + ([] if ENVIRONMENT == "production" else _csv_env("CORS_ORIGINS") + _csv_env("FRONTEND_ORIGINS") + _csv_env("FRONTEND_ORIGIN"))
 ))
 
 logger.info("Allowed CORS origins: %s", ALLOWED_ORIGINS)
 
+TRUSTED_HOSTS = [
+    host.strip()
+    for host in os.getenv("TRUSTED_HOSTS", "").split(",")
+    if host.strip()
+]
+if not TRUSTED_HOSTS:
+    TRUSTED_HOSTS = ["localhost", "127.0.0.1", "*.onrender.com"]
+
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=TRUSTED_HOSTS,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -143,12 +172,23 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none'"
+    return response
+
+
 
 # =========================
 # ROUTERS
 # =========================
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(marketplace_router)
+app.include_router(admin_router)
 
 
 
@@ -223,6 +263,29 @@ def validate_crop(crop: str):
 # =========================
 # GLOBAL ERROR HANDLER
 # =========================
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "error": exc.detail,
+        },
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "error": exc.errors(),
+        },
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
@@ -252,6 +315,7 @@ async def health():
 
     models = model_status()
     database_status = "connected"
+    missing_env = missing_required_env_vars()
 
     try:
         await check_database()
@@ -271,6 +335,7 @@ async def health():
         "database": database_status,
         "models": models,
         "missing_models": missing_models,
+        "missing_env": missing_env,
     }
 
 # =========================

@@ -5,8 +5,9 @@ class UserRegister(BaseModel):
     name: str = Field(..., min_length=2, max_length=80)
     email: EmailStr
     password: str = Field(..., min_length=6, max_length=128)
-    role: str = Field(default="user", pattern="^(user|admin|farmer|buyer|seller)$")
+    role: str = Field(default="farmer", pattern="^(farmer|admin)$")
     otp_code: str | None = Field(default=None, min_length=4, max_length=8)
+    admin_secret: str | None = Field(default=None, min_length=1, max_length=256)
 
 
 class UserLogin(BaseModel):
@@ -28,7 +29,7 @@ class ForgotPasswordReset(BaseModel):
 
 class GoogleAuthRequest(BaseModel):
     id_token: str
-    role: str = Field(default="user", pattern="^(user|admin|farmer|buyer|seller)$")
+    role: str = Field(default="farmer", pattern="^(farmer|admin)$")
 
 
 class TokenResponse(BaseModel):

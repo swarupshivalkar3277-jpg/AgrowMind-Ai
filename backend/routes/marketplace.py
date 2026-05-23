@@ -6,22 +6,24 @@ import os
 from datetime import datetime, timezone
 from uuid import uuid4
 
+import httpx
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-import requests
 from pymongo import ReturnDocument
 from pymongo.errors import PyMongoError
 
 from auth.deps import get_current_user, require_role
 from database.mongodb import db, drop_parallel_array_product_indexes
+from utils.rate_limit import rate_limit
 
 router = APIRouter(prefix="/marketplace", tags=["Marketplace"])
 
 TAX_RATE = 0.05
 FREE_SHIPPING_THRESHOLD = 999
 DELIVERY_CHARGE = 60
+ORDER_STATUSES = {"pending", "paid", "processing", "shipped", "delivered", "cancelled"}
 
 
 class CartItemIn(BaseModel):
@@ -42,8 +44,14 @@ class CheckoutAddress(BaseModel):
     razorpay_signature: str | None = None
 
 
-class RazorpayOrderRequest(BaseModel):
+class RazorpayOrderRequest(CheckoutAddress):
     receipt: str | None = None
+
+
+class RazorpayVerifyRequest(BaseModel):
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
 
 
 class ProductIn(BaseModel):
@@ -125,13 +133,23 @@ async def ensure_stock(cart: dict) -> None:
             raise HTTPException(status_code=400, detail=f"Insufficient stock for {item['product']['name']}")
 
 
-async def decrement_stock(cart: dict) -> None:
-    await ensure_stock(cart)
+async def decrement_stock_atomic(cart: dict) -> None:
+    updated: list[tuple[ObjectId, int]] = []
     for item in cart["items"]:
-        await db.products.update_one(
-            {"_id": object_id(item["product"]["id"])},
-            {"$inc": {"stock": -int(item["quantity"])}},
+        product_id = object_id(item["product"]["id"])
+        quantity = int(item["quantity"])
+        product = await db.products.find_one_and_update(
+            {"_id": product_id, "stock": {"$gte": quantity}},
+            {"$inc": {"stock": -quantity}, "$set": {"updated_at": datetime.now(timezone.utc)}},
+            return_document=ReturnDocument.AFTER,
         )
+        if product:
+            updated.append((product_id, quantity))
+            continue
+
+        for rollback_id, rollback_quantity in updated:
+            await db.products.update_one({"_id": rollback_id}, {"$inc": {"stock": rollback_quantity}})
+        raise HTTPException(status_code=409, detail=f"Insufficient stock for {item['product']['name']}")
 
 
 def razorpay_credentials() -> tuple[str, str]:
@@ -162,15 +180,25 @@ async def hydrate_cart(cart: dict) -> dict:
             products[str(product["_id"])] = serialize_product(product)
 
     items = []
+    cleaned_items = []
     subtotal = 0.0
     for item in cart.get("items", []):
         product = products.get(item["product_id"])
-        if not product:
+        if not product or product["stock"] <= 0:
             continue
-        quantity = int(item.get("quantity", 1))
+        quantity = min(int(item.get("quantity", 1)), product["stock"])
+        if quantity <= 0:
+            continue
         line_total = round(product["price"] * quantity, 2)
         subtotal += line_total
+        cleaned_items.append({"product_id": item["product_id"], "quantity": quantity})
         items.append({"product": product, "quantity": quantity, "line_total": line_total})
+
+    if cleaned_items != cart.get("items", []):
+        await db.carts.update_one(
+            {"_id": cart["_id"]},
+            {"$set": {"items": cleaned_items, "updated_at": datetime.now(timezone.utc)}},
+        )
 
     subtotal = round(subtotal, 2)
     tax = round(subtotal * TAX_RATE, 2)
@@ -188,7 +216,7 @@ async def hydrate_cart(cart: dict) -> dict:
     }
 
 
-def verify_razorpay_signature(payload: CheckoutAddress) -> bool:
+def verify_razorpay_signature(payload: CheckoutAddress | RazorpayVerifyRequest) -> bool:
     secret = os.getenv("RAZORPAY_KEY_SECRET")
     if not secret or not payload.razorpay_order_id or not payload.razorpay_payment_id or not payload.razorpay_signature:
         return False
@@ -235,7 +263,7 @@ async def product_details(product_id: str):
 
 
 @router.post("/products", status_code=status.HTTP_201_CREATED)
-async def create_product(payload: ProductIn, user=Depends(require_role("admin", "farmer", "seller"))):
+async def create_product(payload: ProductIn, user=Depends(require_role("admin"))):
     now = datetime.now(timezone.utc)
     document = {
         **payload.model_dump(),
@@ -250,12 +278,10 @@ async def create_product(payload: ProductIn, user=Depends(require_role("admin", 
 
 
 @router.put("/products/{product_id}")
-async def update_product(product_id: str, payload: ProductIn, user=Depends(require_role("admin", "farmer", "seller"))):
+async def update_product(product_id: str, payload: ProductIn, user=Depends(require_role("admin"))):
     existing = await db.products.find_one({"_id": object_id(product_id)})
     if not existing:
         raise HTTPException(status_code=404, detail="Product not found")
-    if user.get("role") != "admin" and existing.get("seller_id") != str(user["_id"]):
-        raise HTTPException(status_code=403, detail="You can edit only your own products")
 
     product = await db.products.find_one_and_update(
         {"_id": object_id(product_id)},
@@ -268,22 +294,13 @@ async def update_product(product_id: str, payload: ProductIn, user=Depends(requi
 
 
 @router.delete("/products/{product_id}")
-async def delete_product(product_id: str, user=Depends(require_role("admin", "farmer", "seller"))):
+async def delete_product(product_id: str, user=Depends(require_role("admin"))):
     existing = await db.products.find_one({"_id": object_id(product_id)})
     if not existing:
         raise HTTPException(status_code=404, detail="Product not found")
-    if user.get("role") != "admin" and existing.get("seller_id") != str(user["_id"]):
-        raise HTTPException(status_code=403, detail="You can delete only your own products")
 
     result = await db.products.delete_one({"_id": object_id(product_id)})
     return {"success": result.deleted_count == 1}
-
-
-@router.get("/seller/products")
-async def seller_products(user=Depends(require_role("admin", "farmer", "seller"))):
-    query = {} if user.get("role") == "admin" else {"seller_id": str(user["_id"])}
-    cursor = db.products.find(query).sort("created_at", -1)
-    return {"success": True, "items": [serialize_product(product) async for product in cursor]}
 
 
 @router.get("/cart")
@@ -348,8 +365,11 @@ async def toggle_wishlist(product_id: str, user=Depends(get_current_user)):
     return {"success": True, "wishlisted": True}
 
 
-@router.post("/payment/razorpay-order")
+@router.post("/payment/razorpay-order", dependencies=[Depends(rate_limit(10, 300))])
 async def create_razorpay_order(payload: RazorpayOrderRequest, user=Depends(get_current_user)):
+    if user.get("role") != "farmer":
+        raise HTTPException(status_code=403, detail="Only farmers can place marketplace orders")
+
     cart = await hydrate_cart(await cart_document(str(user["_id"])))
     if not cart["items"]:
         raise HTTPException(status_code=400, detail="Cart is empty")
@@ -357,17 +377,18 @@ async def create_razorpay_order(payload: RazorpayOrderRequest, user=Depends(get_
 
     key_id, key_secret = razorpay_credentials()
     receipt = payload.receipt or f"agromind-{uuid4().hex[:16]}"
-    response = requests.post(
-        "https://api.razorpay.com/v1/orders",
-        auth=(key_id, key_secret),
-        json={
-            "amount": int(round(cart["total"] * 100)),
-            "currency": "INR",
-            "receipt": receipt,
-            "notes": {"user_id": str(user["_id"]), "email": user["email"]},
-        },
-        timeout=20,
-    )
+    amount_paise = int(round(cart["total"] * 100))
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.post(
+            "https://api.razorpay.com/v1/orders",
+            auth=(key_id, key_secret),
+            json={
+                "amount": amount_paise,
+                "currency": "INR",
+                "receipt": receipt,
+                "notes": {"user_id": str(user["_id"]), "email": user["email"]},
+            },
+        )
 
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail=f"Razorpay order creation failed: {response.text}")
@@ -375,13 +396,130 @@ async def create_razorpay_order(payload: RazorpayOrderRequest, user=Depends(get_
     order = response.json()
     await db.payments.insert_one({
         "user_id": str(user["_id"]),
+        "user_email": user["email"],
         "status": "created",
         "method": "razorpay",
         "razorpay_order_id": order.get("id"),
+        "amount_paise": amount_paise,
         "amount": cart["total"],
+        "currency": order.get("currency", "INR"),
+        "cart_snapshot": cart,
+        "address": payload.model_dump(exclude={"receipt", "payment_method", "razorpay_order_id", "razorpay_payment_id", "razorpay_signature"}),
         "created_at": datetime.now(timezone.utc),
     })
-    return {"success": True, "key_id": key_id, "razorpay_order": order, "cart": cart}
+    return {
+        "success": True,
+        "data": {
+            "razorpay_order_id": order.get("id"),
+            "amount": amount_paise,
+            "currency": order.get("currency", "INR"),
+            "razorpay_key": key_id,
+            "cart": cart,
+        },
+        "key_id": key_id,
+        "razorpay_order": order,
+        "cart": cart,
+    }
+
+
+@router.post("/payment/verify", status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit(15, 300))])
+async def verify_razorpay_payment(payload: RazorpayVerifyRequest, user=Depends(get_current_user)):
+    if user.get("role") != "farmer":
+        raise HTTPException(status_code=403, detail="Only farmers can place marketplace orders")
+
+    if not verify_razorpay_signature(payload):
+        await db.payments.update_one(
+            {"razorpay_order_id": payload.razorpay_order_id, "user_id": str(user["_id"])},
+            {"$set": {"status": "failed", "failure_reason": "invalid_signature", "updated_at": datetime.now(timezone.utc)}},
+        )
+        raise HTTPException(status_code=400, detail="Payment verification failed")
+
+    payment = await db.payments.find_one({
+        "razorpay_order_id": payload.razorpay_order_id,
+        "user_id": str(user["_id"]),
+        "method": "razorpay",
+    })
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment session not found")
+    if payment.get("status") == "paid" and payment.get("order_id"):
+        order = await db.orders.find_one({"_id": object_id(payment["order_id"])})
+        return {"success": True, "data": {"order": serialize_order(order), "payment": {"status": "paid"}}}
+    if payment.get("status") not in {"created", "failed"}:
+        raise HTTPException(status_code=409, detail="Payment verification is already being processed")
+
+    claimed = await db.payments.find_one_and_update(
+        {"_id": payment["_id"], "status": {"$in": ["created", "failed"]}},
+        {"$set": {"status": "processing", "updated_at": datetime.now(timezone.utc)}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not claimed:
+        raise HTTPException(status_code=409, detail="Payment verification is already being processed")
+    payment = claimed
+
+    cart = payment.get("cart_snapshot") or {}
+    if not cart.get("items"):
+        raise HTTPException(status_code=400, detail="Payment cart snapshot is empty")
+
+    try:
+        await ensure_stock(cart)
+        await decrement_stock_atomic(cart)
+    except HTTPException:
+        await db.payments.update_one(
+            {"_id": payment["_id"]},
+            {"$set": {"status": "stock_failed", "updated_at": datetime.now(timezone.utc)}},
+        )
+        raise
+
+    now = datetime.now(timezone.utc)
+    order = {
+        "user_id": str(user["_id"]),
+        "user_email": user["email"],
+        "items": cart["items"],
+        "address": payment.get("address", {}),
+        "subtotal": cart["subtotal"],
+        "tax": cart["tax"],
+        "shipping": cart["shipping"],
+        "total": cart["total"],
+        "payment_method": "razorpay",
+        "payment_status": "paid",
+        "order_status": "paid",
+        "tracking": [{"status": "paid", "message": "Payment verified and order received", "at": now}],
+        "transaction_id": payload.razorpay_payment_id,
+        "razorpay_order_id": payload.razorpay_order_id,
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = await db.orders.insert_one(order)
+    await db.payments.update_one(
+        {"_id": payment["_id"], "status": {"$ne": "paid"}},
+        {
+            "$set": {
+                "order_id": str(result.inserted_id),
+                "payment_id": payload.razorpay_payment_id,
+                "razorpay_payment_id": payload.razorpay_payment_id,
+                "razorpay_signature": payload.razorpay_signature,
+                "status": "paid",
+                "updated_at": now,
+            }
+        },
+    )
+    await db.carts.update_one({"user_id": str(user["_id"])}, {"$set": {"items": [], "updated_at": now}})
+
+    created = await db.orders.find_one({"_id": result.inserted_id})
+    return {
+        "success": True,
+        "data": {
+            "order": serialize_order(created),
+            "payment": {
+                "payment_id": payload.razorpay_payment_id,
+                "order_id": str(result.inserted_id),
+                "razorpay_order_id": payload.razorpay_order_id,
+                "amount": cart["total"],
+                "status": "paid",
+            },
+        },
+        "order": serialize_order(created),
+    }
 
 
 @router.get("/wishlist")
@@ -392,8 +530,11 @@ async def get_wishlist(user=Depends(get_current_user)):
     return {"success": True, "items": items}
 
 
-@router.post("/checkout", status_code=status.HTTP_201_CREATED)
+@router.post("/checkout", status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit(10, 300))])
 async def checkout(payload: CheckoutAddress, user=Depends(get_current_user)):
+    if user.get("role") != "farmer":
+        raise HTTPException(status_code=403, detail="Only farmers can place marketplace orders")
+
     cart = await hydrate_cart(await cart_document(str(user["_id"])))
     if not cart["items"]:
         raise HTTPException(status_code=400, detail="Cart is empty")
@@ -405,27 +546,17 @@ async def checkout(payload: CheckoutAddress, user=Depends(get_current_user)):
     if payment_method == "cash_on_delivery":
         payment_status = "pending"
         transaction_id = f"COD-{uuid4().hex[:10].upper()}"
-    elif payment_method in {"upi", "card"}:
-        payment_status = "paid"
-        transaction_id = f"SIM-{uuid4().hex[:12].upper()}"
     elif payment_method == "razorpay":
-        if not verify_razorpay_signature(payload):
-            await db.payments.insert_one({
-                "user_id": str(user["_id"]),
-                "status": "failed",
-                "method": payment_method,
-                "created_at": datetime.now(timezone.utc),
-            })
-            raise HTTPException(status_code=400, detail="Payment verification failed")
-        payment_status = "paid"
-        transaction_id = payload.razorpay_payment_id
+        raise HTTPException(status_code=400, detail="Use /marketplace/payment/verify for Razorpay payments")
     else:
         raise HTTPException(status_code=400, detail="Unsupported payment method")
 
-    await decrement_stock(cart)
+    await decrement_stock_atomic(cart)
     now = datetime.now(timezone.utc)
+    order_status = "paid" if payment_status == "paid" else "pending"
     order = {
         "user_id": str(user["_id"]),
+        "user_email": user["email"],
         "items": cart["items"],
         "address": payload.model_dump(exclude={"razorpay_order_id", "razorpay_payment_id", "razorpay_signature"}),
         "subtotal": cart["subtotal"],
@@ -434,8 +565,8 @@ async def checkout(payload: CheckoutAddress, user=Depends(get_current_user)):
         "total": cart["total"],
         "payment_method": payment_method,
         "payment_status": payment_status,
-        "order_status": "confirmed",
-        "tracking": [{"status": "confirmed", "message": "Order received", "at": now}],
+        "order_status": order_status,
+        "tracking": [{"status": order_status, "message": "Order received", "at": now}],
         "transaction_id": transaction_id,
         "created_at": now,
         "updated_at": now,
@@ -478,21 +609,3 @@ async def cancel_order(order_id: str, user=Depends(get_current_user)):
     )
     return {"success": True, "order": serialize_order(updated)}
 
-
-@router.get("/admin/orders")
-async def admin_orders(user=Depends(require_role("admin"))):
-    cursor = db.orders.find({}).sort("created_at", -1).limit(200)
-    return {"success": True, "items": [serialize_order(order) async for order in cursor]}
-
-
-@router.put("/admin/orders/{order_id}/status")
-async def update_order_status(order_id: str, status_value: str, user=Depends(require_role("admin"))):
-    now = datetime.now(timezone.utc)
-    order = await db.orders.find_one_and_update(
-        {"_id": object_id(order_id)},
-        {"$set": {"order_status": status_value, "updated_at": now}, "$push": {"tracking": {"status": status_value, "message": f"Order marked {status_value}", "at": now}}},
-        return_document=ReturnDocument.AFTER,
-    )
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    return {"success": True, "order": serialize_order(order)}

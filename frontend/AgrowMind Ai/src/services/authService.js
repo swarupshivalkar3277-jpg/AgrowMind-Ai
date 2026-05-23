@@ -96,7 +96,7 @@ export function deleteProduct(productId) {
 }
 
 export function getSellerProducts() {
-  return api.get("/marketplace/seller/products");
+  return api.get("/marketplace/products");
 }
 
 export function getCart() {
@@ -131,6 +131,10 @@ export function createRazorpayOrder(payload = {}) {
   return api.post("/marketplace/payment/razorpay-order", payload);
 }
 
+export function verifyRazorpayPayment(payload) {
+  return api.post("/marketplace/payment/verify", payload);
+}
+
 export function getOrders() {
   return api.get("/marketplace/orders");
 }
@@ -140,13 +144,41 @@ export function cancelOrder(orderId) {
 }
 
 export function getAdminOrders() {
-  return api.get("/marketplace/admin/orders");
+  return api.get("/admin/orders");
 }
 
 export function updateAdminOrderStatus(orderId, statusValue) {
-  return api.put(`/marketplace/admin/orders/${orderId}/status`, null, {
+  return api.patch(`/admin/orders/${orderId}/status`, null, {
     params: { status_value: statusValue },
   });
+}
+
+export function getAdminAnalytics() {
+  return api.get("/admin/analytics");
+}
+
+export function getAdminUsers(params = {}) {
+  return api.get("/admin/users", { params });
+}
+
+export function deleteAdminUser(userId) {
+  return api.delete(`/admin/users/${userId}`);
+}
+
+export function blockAdminUser(userId, blocked) {
+  return api.patch(`/admin/users/${userId}/block`, { blocked });
+}
+
+export function createAdminProduct(payload) {
+  return api.post("/admin/products", payload);
+}
+
+export function updateAdminProduct(productId, payload) {
+  return api.put(`/admin/products/${productId}`, payload);
+}
+
+export function deleteAdminProduct(productId) {
+  return api.delete(`/admin/products/${productId}`);
 }
 
 export default api;

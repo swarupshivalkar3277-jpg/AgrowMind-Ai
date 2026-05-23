@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import { Bell, Menu, Search, ShoppingCart } from "lucide-react";
 
 import { useAuth } from "../context/AuthContext";
@@ -20,7 +19,6 @@ export default function Topbar({ onMenu }) {
         <input placeholder="Search products, orders, crop history" type="search" />
       </label>
       <div className="topbarRight">
-        <Link className="quickSellButton" to="/sell">Sell</Link>
         <button aria-label="Open cart" className="iconButton cartIcon" onClick={() => setDrawerOpen(true)} type="button">
           <ShoppingCart size={20} />
           <span>{cart.count || 0}</span>
