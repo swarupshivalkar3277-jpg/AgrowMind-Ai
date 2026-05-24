@@ -97,3 +97,14 @@ frontend/AgrowMind Ai/.env.production
 *.docx
 *.pub
 echo backend/training/*.keras >> .gitignore
+# AI models
+*.keras
+backend/training/*.keras
+
+# Local notes / passwords
+New Text Document (2).txt
+text doc and passwords/
+
+# Environment files
+.env
+.env.*
