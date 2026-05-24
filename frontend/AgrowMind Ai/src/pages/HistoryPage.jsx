@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { ScanSearch } from "lucide-react";
+import { Link } from "react-router-dom";
+
+import EmptyState from "../components/EmptyState";
 import HistoryCard from "../components/HistoryCard";
 import { useAuth } from "../context/AuthContext";
 import { getHistory } from "../services/authService";
@@ -84,7 +88,14 @@ export default function HistoryPage() {
             <button className="textButton" onClick={() => downloadPredictionReport({ user, crop: item.crop, prediction: item.prediction, createdAt: item.created_at })} type="button">Export PDF</button>
           </article>
         ))}
-        {filtered.length === 0 && <div className="emptyMarket">No prediction history found.</div>}
+        {filtered.length === 0 && (
+          <EmptyState
+            action={<Link className="primaryButton" to="/diagnose">Start Diagnosis</Link>}
+            icon={ScanSearch}
+            title="No prediction history found"
+            text="Run a crop scan to build a searchable timeline of diseases, confidence, severity, and treatment reports."
+          />
+        )}
       </section>
     </main>
   );

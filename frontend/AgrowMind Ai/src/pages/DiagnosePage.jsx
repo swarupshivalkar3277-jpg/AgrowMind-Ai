@@ -106,10 +106,9 @@ export default function DiagnosePage() {
         <div className="predictionPanel">
           {loading ? (
             <div className="analysisLoader premiumLoader">
-              <span />
+              <div className="skeletonStack"><i /><i /><i /></div>
               <strong>Processing leaf image...</strong>
               <p>Running disease classification, severity scoring, and product matching.</p>
-              <div className="skeletonStack"><i /><i /><i /></div>
             </div>
           ) : (
             <PredictionResultCard

@@ -27,7 +27,12 @@ export default function AdminDashboard() {
   }, []);
 
   if (loading) {
-    return <main className="stateScreen"><span className="spinner" /><h1>Loading admin dashboard</h1></main>;
+    return (
+      <main className="stateScreen premiumLoader">
+        <div className="skeletonStack"><i /><i /><i /></div>
+        <h1>Loading admin dashboard</h1>
+      </main>
+    );
   }
 
   const revenueData = orders.slice(0, 8).reverse().map((order, index) => ({ name: `O${index + 1}`, revenue: Number(order.total || 0) }));
@@ -43,6 +48,11 @@ export default function AdminDashboard() {
           <span className="eyebrowText">Admin Dashboard</span>
           <h1>Platform control center</h1>
           <p>Monitor users, crop intelligence, revenue, inventory, marketplace health, and operational activity.</p>
+          <div className="heroMeta">
+            <span>Revenue Rs. {analytics?.total_revenue ?? 0}</span>
+            <span>{analytics?.total_users ?? 0} users</span>
+            <span>{analytics?.total_ai_predictions ?? 0} predictions</span>
+          </div>
         </div>
         <Link className="primaryButton" to="/admin/products/add">Add Product</Link>
       </section>

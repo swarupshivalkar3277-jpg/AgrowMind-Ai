@@ -74,7 +74,7 @@ export default function Dashboard() {
             {recentDiseases.map((item) => (
               <article key={item.id}>
                 <strong>{item.prediction?.disease?.replaceAll("_", " ") || "Crop scan"}</strong>
-                <span>{item.crop} • {Math.round(Number(item.prediction?.confidence || 0))}% confidence</span>
+                <span>{item.crop} - {Math.round(Number(item.prediction?.confidence || 0))}% confidence</span>
               </article>
             ))}
             {recentDiseases.length === 0 && <div className="emptyState">No scans yet. Start with your first AI diagnosis.</div>}
@@ -90,7 +90,7 @@ export default function Dashboard() {
             {recentOrders.map((order) => (
               <article key={order.id}>
                 <strong>Order #{order.id.slice(-8)}</strong>
-                <span>Rs. {order.total} • {order.order_status}</span>
+                <span>Rs. {order.total} - {order.order_status}</span>
               </article>
             ))}
             {recentOrders.length === 0 && <div className="emptyState">No purchases yet. Recommended inputs will appear after checkout.</div>}

@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 
+import { Link } from "react-router-dom";
+import { Heart } from "lucide-react";
+
+import EmptyState from "../components/EmptyState";
 import ProductCard from "../components/ProductCard";
 import { getWishlist } from "../services/authService";
 
@@ -22,7 +26,14 @@ export default function WishlistPage() {
       <section className="productGrid">
         {products.map((product) => <ProductCard key={product.id} product={product} />)}
       </section>
-      {products.length === 0 && <div className="emptyMarket">No wishlist products yet.</div>}
+      {products.length === 0 && (
+        <EmptyState
+          action={<Link className="primaryButton" to="/marketplace">Find Products</Link>}
+          icon={Heart}
+          title="No saved products yet"
+          text="Save fertilizers, seeds, pesticides, tools, and saplings while comparing options."
+        />
+      )}
     </main>
   );
 }

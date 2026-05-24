@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Edit3, Plus, Search, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 
+import EmptyState from "../../components/EmptyState";
 import { deleteAdminProduct, getProducts } from "../../services/authService";
 
 export default function AdminProducts() {
@@ -63,7 +64,14 @@ export default function AdminProducts() {
           </article>
         ))}
       </section>
-      {!loading && filtered.length === 0 && <div className="emptyMarket">No products found.</div>}
+      {!loading && filtered.length === 0 && (
+        <EmptyState
+          action={<Link className="primaryButton" to="/admin/products/add"><Plus size={17} /> Add Product</Link>}
+          icon={Plus}
+          title="No products found"
+          text="Create the first marketplace product with crop, disease, dosage, usage, and image details."
+        />
+      )}
     </main>
   );
 }

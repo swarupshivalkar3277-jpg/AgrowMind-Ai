@@ -37,7 +37,12 @@ export default function ProductCard({ product }) {
 
   return (
     <article className="productCard">
-      <Link to={`/marketplace/product/${product.id}`}>
+      <Link className="productImageLink" to={`/marketplace/product/${product.id}`}>
+        <div className="productBadgeStack">
+          {Number(product.rating || 0) >= 4.5 && <span>Bestseller</span>}
+          {product.featured && <span>Featured</span>}
+          {product.stock > 0 && product.stock <= 5 && <span>Low stock</span>}
+        </div>
         <img alt={product.name} src={product.image || "https://images.unsplash.com/photo-1464226184884-fa280b87c399?auto=format&fit=crop&w=900&q=80"} />
       </Link>
       <div className="productCardBody">

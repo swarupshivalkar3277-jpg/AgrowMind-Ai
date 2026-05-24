@@ -1,4 +1,5 @@
 import { Download, FileText, ShoppingBag, Sprout, Table2 } from "lucide-react";
+import EmptyState from "../components/EmptyState";
 
 export default function ReportsPage() {
   return (
@@ -12,6 +13,11 @@ export default function ReportsPage() {
           ["Admin Analytics Report", "Investor-ready platform metrics for admins.", FileText],
         ].map(([title, text, Icon]) => <article className="panel reportCard" key={title}><Icon size={24} /><h2>{title}</h2><p>{text}</p><button className="secondaryButton" type="button"><Download size={16} /> Export PDF</button></article>)}
       </section>
+      <EmptyState
+        icon={FileText}
+        title="Saved report library coming online"
+        text="Generated prediction PDFs, invoices, and admin exports will be collected here for quick download."
+      />
     </main>
   );
 }

@@ -16,7 +16,13 @@ export default function ProductDetails() {
   const [quantity, setQuantity] = useState(1);
 
   useEffect(() => {
-    getProduct(id).then(({ data }) => setProduct(data.product));
+    getProduct(id).then(({ data }) => {
+      const nextProduct = data.product;
+      setProduct(nextProduct);
+      const stored = JSON.parse(localStorage.getItem("agromind:recent-products") || "[]");
+      const next = [nextProduct, ...stored.filter((item) => item.id !== nextProduct.id)].slice(0, 6);
+      localStorage.setItem("agromind:recent-products", JSON.stringify(next));
+    });
   }, [id]);
 
   async function addAndMaybeCheckout(goCheckout = false) {
@@ -34,7 +40,17 @@ export default function ProductDetails() {
   }
 
   if (!product) {
-    return <main className="publicPage"><PublicNav /><div className="pageStack"><div className="analysisLoader"><span /><strong>Loading product...</strong></div></div></main>;
+    return (
+      <main className="publicPage">
+        <PublicNav />
+        <div className="pageStack">
+          <div className="analysisLoader premiumLoader">
+            <div className="skeletonStack"><i /><i /><i /></div>
+            <strong>Loading product...</strong>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   const image = product.image || "https://images.unsplash.com/photo-1464226184884-fa280b87c399?auto=format&fit=crop&w=1200&q=80";
@@ -62,6 +78,11 @@ export default function ProductDetails() {
             <span>Rating {product.rating}/5</span>
             <span>{product.stock} in stock</span>
             <span>Store: {product.seller_name}</span>
+          </div>
+          <div className="productTrustRow">
+            <span>AI matched</span>
+            <span>Safe checkout</span>
+            <span>Verified seller</span>
           </div>
           {product.stock <= 0 && <div className="alert">Out of Stock</div>}
           <label className="quantityInput">

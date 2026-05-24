@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { ShoppingBag } from "lucide-react";
 
+import EmptyState from "../components/EmptyState";
 import OrderCard from "../components/OrderCard";
 import { cancelOrder, getOrders } from "../services/authService";
 import { downloadPredictionReport } from "../utils/reportPdf";
@@ -40,7 +43,14 @@ export default function Orders() {
               order={order}
             />
           ))}
-          {orders.length === 0 && <p>No orders yet.</p>}
+          {orders.length === 0 && (
+            <EmptyState
+              action={<Link className="primaryButton" to="/marketplace">Browse Marketplace</Link>}
+              icon={ShoppingBag}
+              title="No orders yet"
+              text="Your paid, processing, shipped, and delivered marketplace orders will appear here."
+            />
+          )}
         </div>
       </section>
     </main>

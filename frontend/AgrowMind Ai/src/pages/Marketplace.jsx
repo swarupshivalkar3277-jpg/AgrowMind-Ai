@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Search, SlidersHorizontal } from "lucide-react";
 
 import MarketplaceCarousel from "../components/MarketplaceCarousel";
+import EmptyState from "../components/EmptyState";
 import ProductCard from "../components/ProductCard";
 import PublicNav from "../components/PublicNav";
 import { useAuth } from "../context/AuthContext";
@@ -19,11 +20,17 @@ export default function Marketplace() {
   const [search, setSearch] = useState(params.get("search") || "");
   const [sort, setSort] = useState("featured");
   const [maxPrice, setMaxPrice] = useState("");
+  const [recentlyViewed, setRecentlyViewed] = useState([]);
   const category = params.get("category") || "";
   const crop = params.get("crop") || "";
   const disease = params.get("disease") || "";
 
   const query = useMemo(() => ({ search, category, crop, disease }), [search, category, crop, disease]);
+
+  useEffect(() => {
+    const stored = JSON.parse(localStorage.getItem("agromind:recent-products") || "[]");
+    setRecentlyViewed(stored.slice(0, 4));
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -93,7 +100,29 @@ export default function Marketplace() {
         {loading && Array.from({ length: 8 }).map((_, index) => <div className="productSkeleton" key={index} />)}
         {!loading && visibleProducts.map((product) => <ProductCard key={product.id} product={product} />)}
       </section>
-      {!loading && visibleProducts.length === 0 && <div className="emptyMarket">No products found.</div>}
+      {recentlyViewed.length > 0 && (
+        <>
+          <section className="sectionHeader marketSectionHeader">
+            <div><span className="eyebrowText">Recently Viewed</span><h2>Continue comparing</h2></div>
+          </section>
+          <section className="miniProductGrid">
+            {recentlyViewed.map((product) => (
+              <Link className="miniProduct" key={product.id} to={`/marketplace/product/${product.id}`}>
+                <img alt={product.name} src={product.image} />
+                <span>{product.category}</span>
+                <strong>{product.name}</strong>
+                <small>Rs. {product.price}</small>
+              </Link>
+            ))}
+          </section>
+        </>
+      )}
+      {!loading && visibleProducts.length === 0 && (
+        <EmptyState
+          title="No matching farm inputs"
+          text="Try clearing filters or searching by crop, disease, product type, or manufacturer."
+        />
+      )}
       </div>
     </main>
   );
