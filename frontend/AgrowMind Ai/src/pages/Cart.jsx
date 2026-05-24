@@ -20,7 +20,7 @@ export default function Cart() {
                 <img alt={item.product.name} src={item.product.image} />
                 <div>
                   <strong>{item.product.name}</strong>
-                  <span>Rs. {item.product.price} each</span>
+                  <span>Rs. {item.product.price} / {item.product.unit_size || item.product.unit || "piece"}</span>
                   {item.product.stock <= 0 && <span className="alert">Out of Stock</span>}
                   {item.quantity > item.product.stock && item.product.stock > 0 && <span className="alert">Only {item.product.stock} available</span>}
                   <div className="quantityControl">

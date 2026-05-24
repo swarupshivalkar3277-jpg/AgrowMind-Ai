@@ -38,6 +38,9 @@ export default function Checkout() {
     state: "",
     district: "",
     pin_code: "",
+    location_lat: "",
+    location_lng: "",
+    location_label: "",
     payment_method: "cash_on_delivery",
   });
   const [error, setError] = useState("");
@@ -47,16 +50,39 @@ export default function Checkout() {
     setForm((current) => ({ ...current, [field]: value }));
   }
 
+  function useLiveLocation() {
+    if (!navigator.geolocation) {
+      setError("Live location is not supported on this device.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setForm((current) => ({
+          ...current,
+          location_lat: position.coords.latitude,
+          location_lng: position.coords.longitude,
+          location_label: `Lat ${position.coords.latitude.toFixed(5)}, Lng ${position.coords.longitude.toFixed(5)}`,
+        }));
+      },
+      () => setError("Could not access live location. Please allow location permission.")
+    );
+  }
+
   async function submit(event) {
     event.preventDefault();
     setLoading(true);
     setError("");
+    const payload = {
+      ...form,
+      location_lat: form.location_lat === "" ? null : Number(form.location_lat),
+      location_lng: form.location_lng === "" ? null : Number(form.location_lng),
+    };
     try {
       if (form.payment_method === "razorpay") {
         const ready = await loadRazorpayScript();
         if (!ready) throw new Error("Could not load Razorpay checkout.");
 
-        const { data: orderData } = await createRazorpayOrder({ ...form, payment_method: "razorpay" });
+        const { data: orderData } = await createRazorpayOrder({ ...payload, payment_method: "razorpay" });
         const payment = orderData.data || {};
 
         await new Promise((resolve, reject) => {
@@ -90,10 +116,10 @@ export default function Checkout() {
         return;
       }
 
-      const { data } = await checkoutCart(form);
+      const { data } = await checkoutCart(payload);
       await refreshCart();
-      toast.success("Order placed");
-      navigate(`/payment/success?order=${data.order.id}`);
+      toast.success("Order placed with Cash on Delivery");
+      navigate(`/payment/success?order=${data.order.id}&method=cod`);
     } catch (err) {
       setError(checkoutErrorMessage(err));
       if (form.payment_method === "razorpay") navigate("/payment/failed");
@@ -117,6 +143,13 @@ export default function Checkout() {
               <input onChange={(event) => update(field, event.target.value)} required value={form[field]} />
             </label>
           ))}
+          <div className="locationBox">
+            <div>
+              <strong>Delivery location</strong>
+              <span>{form.location_label || "Optional: share live location for easier delivery."}</span>
+            </div>
+            <button className="secondaryButton" onClick={useLiveLocation} type="button">Use Live Location</button>
+          </div>
           <label>
             <span>Payment method</span>
             <select onChange={(event) => update("payment_method", event.target.value)} value={form.payment_method}>
@@ -135,6 +168,7 @@ export default function Checkout() {
           {cart.items.map((item) => (
             <span key={item.product.id}>
               {item.product.name} x {item.quantity} - Rs. {item.line_total}
+              {item.product.unit_size ? ` (${item.product.unit_size})` : ""}
               {item.product.stock <= 0 ? " (Out of Stock)" : item.quantity > item.product.stock ? " (Stock unavailable)" : ""}
             </span>
           ))}

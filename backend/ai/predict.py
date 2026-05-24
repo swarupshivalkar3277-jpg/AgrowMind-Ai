@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from ai.recommendations import recommendation_for, validate_recommendation_coverage
+
 
 tf = None
 logger = logging.getLogger("agromind.ai.predict")
@@ -197,8 +199,11 @@ def load_class_names(crop: str) -> list[str]:
     with path.open("r", encoding="utf-8") as file:
         class_names = json.load(file)
 
+    if isinstance(class_names, dict):
+        class_names = class_names.get("class_names", [])
+
     if not isinstance(class_names, list) or not all(isinstance(item, str) and item.strip() for item in class_names):
-        raise ValueError(f"Invalid class metadata in {path}. Expected a JSON array of class names.")
+        raise ValueError(f"Invalid class metadata in {path}. Expected class_names as a JSON array.")
 
     return class_names
 
@@ -291,6 +296,14 @@ def load_crop_model(crop: str):
                 "model_path": str(model_path),
             }
 
+        missing_recommendations = validate_recommendation_coverage(crop, class_names)
+        if missing_recommendations:
+            return None, None, {
+                "error": "Recommendation mappings missing",
+                "crop": crop,
+                "missing_recommendations": missing_recommendations,
+            }
+
         metadata["class_names"] = class_names
         loaded_models[crop] = {
             "path": model_path,
@@ -330,6 +343,13 @@ def image_to_batch(image_path: str | Path, size: tuple[int, int]) -> np.ndarray:
     image = image.resize(size, Image.Resampling.BILINEAR)
     array = np.asarray(image, dtype=np.float32)
     return np.expand_dims(array, axis=0)
+
+
+def image_quality_score(batch: np.ndarray) -> float:
+    image = np.squeeze(batch).astype(np.float32)
+    contrast = float(np.std(image) / 64.0)
+    brightness = float(1.0 - abs(np.mean(image) - 127.5) / 127.5)
+    return round(max(0.0, min(1.0, (contrast * 0.55) + (brightness * 0.45))) * 100, 2)
 
 
 def apply_input_scale(batch: np.ndarray, metadata: dict) -> np.ndarray:
@@ -378,7 +398,7 @@ def confidence_notes(scores: np.ndarray) -> list[str]:
     margin = float(sorted_scores[0] - sorted_scores[1]) if len(sorted_scores) > 1 else top_score
 
     notes = []
-    if top_score < 0.60:
+    if top_score < float(os.getenv("PREDICTION_CONFIDENCE_THRESHOLD", "0.60")):
         notes.append("low_confidence")
     if margin < 0.15:
         notes.append("ambiguous_top_classes")
@@ -394,7 +414,9 @@ def predict_image(image_path, model_type):
             return error
 
         image_size = get_model_image_size(model, metadata)
-        batch = apply_input_scale(image_to_batch(image_path, image_size), metadata)
+        raw_batch = image_to_batch(image_path, image_size)
+        quality = image_quality_score(raw_batch)
+        batch = apply_input_scale(raw_batch, metadata)
 
         logger.info(
             "Running prediction crop=%s image_size=%s class_count=%s model_output_shape=%s",
@@ -423,6 +445,13 @@ def predict_image(image_path, model_type):
         predicted_index = int(np.argmax(scores))
         predicted_class = class_names[predicted_index]
         confidence = float(scores[predicted_index] * 100)
+        top_predictions = [
+            {"class_name": class_names[index], "confidence": round(float(scores[index] * 100), 2)}
+            for index in np.argsort(scores)[::-1][:5]
+        ]
+        notes = confidence_notes(scores)
+        recommendations = recommendation_for(model_type, predicted_class)
+        disease = "Unknown Disease" if "low_confidence" in notes else predicted_class
         logger.info(
             "Prediction complete crop=%s predicted_index=%s disease=%s confidence=%.2f",
             model_type,
@@ -432,9 +461,17 @@ def predict_image(image_path, model_type):
         )
 
         return {
-            "disease": predicted_class,
+            "crop": model_type,
+            "disease": disease,
+            "class_name": predicted_class,
             "confidence": round(confidence, 2),
-            "notes": confidence_notes(scores),
+            "top_predictions": top_predictions,
+            "recommendations": recommendations,
+            "recommendation": recommendations,
+            "image_quality_score": quality,
+            "low_confidence": "low_confidence" in notes,
+            "warning": "Low confidence prediction. Please upload a clearer crop image." if "low_confidence" in notes else "",
+            "notes": notes,
             "all_scores": {
                 class_names[index]: round(float(scores[index] * 100), 2)
                 for index in range(len(class_names))

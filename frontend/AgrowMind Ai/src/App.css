@@ -599,6 +599,18 @@ body.dark .topSearch { background: rgba(15, 23, 42, 0.58); }
 .cartItem div { display: grid; gap: 7px; }
 .quantityControl { width: fit-content; display: inline-flex; align-items: center; gap: 8px; padding: 4px; border-radius: var(--radius); background: rgba(16, 185, 129, 0.1); }
 .quantityControl button { width: 30px; height: 30px; border-radius: 6px; color: var(--green); background: white; font-weight: 900; }
+.locationBox {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(16, 185, 129, 0.07);
+}
+.locationBox div { display: grid; gap: 4px; }
+.locationBox span { color: var(--muted); line-height: 1.5; }
 .cartSummary, .orderSummary {
   display: grid;
   gap: 12px;
@@ -628,6 +640,25 @@ body.dark .topSearch { background: rgba(15, 23, 42, 0.58); }
 .orderCard div, .historyCard div { display: grid; gap: 6px; }
 .orderCard span, .historyCard p, .historyMetrics span { color: var(--muted); }
 .statusRail span { color: var(--green); font-weight: 900; text-transform: capitalize; }
+.orderTrack {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.orderTrack span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(15, 23, 42, 0.06);
+  font-size: var(--text-xs);
+  font-weight: 900;
+  text-transform: capitalize;
+}
+.orderTrack span.done {
+  color: #065f46;
+  background: rgba(16, 185, 129, 0.14);
+}
 
 .historyCard { grid-template-columns: minmax(0, 1fr) auto auto; }
 .historyCard h3 { text-transform: capitalize; }

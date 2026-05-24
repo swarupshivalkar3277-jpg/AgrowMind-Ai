@@ -16,6 +16,8 @@ const initialProduct = {
   discount: "",
   price: "",
   stock: "",
+  unit: "piece",
+  unit_size: "1 piece",
   sku: "",
   short_description: "",
   description: "",
@@ -46,6 +48,8 @@ function normalize(form) {
     discount: Number(form.discount || 0),
     price: Number(form.price || 0),
     stock: Number(form.stock || 0),
+    unit: form.unit.trim(),
+    unit_size: form.unit_size.trim(),
     sku: form.sku.trim(),
     short_description: form.short_description.trim(),
     description: form.description.trim(),
@@ -155,6 +159,10 @@ export default function AdminProductForm() {
           </div>
           <div className="formRow">
             <label><span>Stock</span><input min="0" required type="number" value={form.stock} onChange={(event) => update("stock", event.target.value)} /></label>
+            <label><span>Unit</span><select value={form.unit} onChange={(event) => update("unit", event.target.value)}><option value="piece">Piece</option><option value="kg">Kg</option><option value="g">Gram</option><option value="liter">Liter</option><option value="ml">ML</option><option value="packet">Packet</option></select></label>
+            <label><span>Pack Size</span><input placeholder="5 kg, 1 liter, 250 g" value={form.unit_size} onChange={(event) => update("unit_size", event.target.value)} /></label>
+          </div>
+          <div className="formRow">
             <label><span>SKU</span><input value={form.sku} onChange={(event) => update("sku", event.target.value)} /></label>
             <label><span>Rating</span><input max="5" min="0" step="0.1" type="number" value={form.rating} onChange={(event) => update("rating", event.target.value)} /></label>
           </div>
@@ -202,7 +210,7 @@ export default function AdminProductForm() {
               <span className="productCategory">{preview.category}</span>
               <h3>{preview.name || "Product name"}</h3>
               <p>{preview.short_description || preview.description || "Product description preview."}</p>
-              <div className="productMeta"><strong>Rs. {preview.price || 0}</strong><span>Stock {preview.stock || 0}</span></div>
+              <div className="productMeta"><strong>Rs. {preview.price || 0}</strong><span>{preview.unit_size}</span><span>Stock {preview.stock || 0}</span></div>
             </div>
           </article>
           <button className="primaryButton" disabled={saving} type="submit"><Save size={17} /> {saving ? "Saving..." : "Save Product"}</button>

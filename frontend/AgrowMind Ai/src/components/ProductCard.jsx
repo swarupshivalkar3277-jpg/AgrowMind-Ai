@@ -50,6 +50,7 @@ export default function ProductCard({ product }) {
           <span className="productCategory">{product.category}</span>
           <h3>{product.name}</h3>
           <p>{product.description}</p>
+          <small className="mutedText">{product.unit_size || product.unit || "1 piece"}</small>
           {product.stock <= 0 && <span className="alert">Out of Stock</span>}
         </div>
         <div className="productMeta">

@@ -4,7 +4,7 @@ import { ShoppingBag } from "lucide-react";
 
 import EmptyState from "../components/EmptyState";
 import OrderCard from "../components/OrderCard";
-import { cancelOrder, getOrders } from "../services/authService";
+import { cancelOrder, getOrders, requestOrderRefund } from "../services/authService";
 import { downloadPredictionReport } from "../utils/reportPdf";
 
 export default function Orders() {
@@ -24,6 +24,11 @@ export default function Orders() {
     await refresh();
   }
 
+  async function handleRefund(orderId) {
+    await requestOrderRefund(orderId);
+    await refresh();
+  }
+
   return (
     <main className="pageStack">
       <section className="panel">
@@ -40,6 +45,7 @@ export default function Orders() {
               key={order.id}
               onCancel={handleCancel}
               onInvoice={() => downloadPredictionReport({ user: { name: order.address.full_name }, crop: "Marketplace", prediction: { disease: `Invoice ${order.id}`, confidence: order.total, fertilizer: [], treatment: [], irrigation: `Transaction: ${order.transaction_id}` } })}
+              onRefund={handleRefund}
               order={order}
             />
           ))}

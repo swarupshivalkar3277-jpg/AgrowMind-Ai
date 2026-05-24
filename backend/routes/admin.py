@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import httpx
+import os
 from bson.errors import InvalidId
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,7 +13,7 @@ from pymongo import ReturnDocument
 from auth.deps import require_role
 from auth.models import user_public
 from database.mongodb import db
-from routes.marketplace import ORDER_STATUSES, ProductIn, object_id, serialize_order, serialize_product
+from routes.marketplace import ORDER_STATUSES, ProductIn, object_id, restore_stock, serialize_order, serialize_product
 
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -109,10 +111,32 @@ async def update_order_status(order_id: str, status_value: str = Query(...), use
         raise HTTPException(status_code=400, detail="Invalid order status")
 
     now = datetime.now(timezone.utc)
+    existing = await db.orders.find_one({"_id": object_id(order_id)})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    set_fields = {"order_status": status_value, "updated_at": now}
+    if status_value == "refunded":
+        if existing.get("payment_method") == "razorpay" and existing.get("transaction_id"):
+            key_id = os.getenv("RAZORPAY_KEY_ID")
+            key_secret = os.getenv("RAZORPAY_KEY_SECRET")
+            if not key_id or not key_secret:
+                raise HTTPException(status_code=503, detail="Razorpay credentials are not configured")
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.post(
+                    f"https://api.razorpay.com/v1/payments/{existing['transaction_id']}/refund",
+                    auth=(key_id, key_secret),
+                    json={"amount": int(round(float(existing.get("total", 0)) * 100)), "speed": "normal"},
+                )
+            if response.status_code >= 400:
+                raise HTTPException(status_code=502, detail="Razorpay refund failed. Check backend logs and Razorpay dashboard.")
+        set_fields.update({"payment_status": "refunded", "refund_status": "refunded", "refunded_at": now})
+        await restore_stock(existing)
+
     order = await db.orders.find_one_and_update(
         {"_id": object_id(order_id)},
         {
-            "$set": {"order_status": status_value, "updated_at": now},
+            "$set": set_fields,
             "$push": {"tracking": {"status": status_value, "message": f"Order marked {status_value}", "at": now}},
         },
         return_document=ReturnDocument.AFTER,

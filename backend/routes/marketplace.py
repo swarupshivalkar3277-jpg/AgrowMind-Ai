@@ -25,7 +25,8 @@ logger = logging.getLogger("agromind.marketplace")
 TAX_RATE = 0.05
 FREE_SHIPPING_THRESHOLD = 999
 DELIVERY_CHARGE = 60
-ORDER_STATUSES = {"pending", "paid", "processing", "shipped", "delivered", "cancelled"}
+ORDER_STATUSES = {"pending", "paid", "processing", "shipped", "delivered", "cancelled", "refund_requested", "refunded"}
+REFUNDABLE_STATUSES = {"paid", "processing", "shipped", "delivered"}
 
 
 class CartItemIn(BaseModel):
@@ -40,6 +41,9 @@ class CheckoutAddress(BaseModel):
     state: str
     district: str
     pin_code: str
+    location_lat: float | None = None
+    location_lng: float | None = None
+    location_label: str | None = None
     payment_method: str = Field(default="cash_on_delivery")
     razorpay_order_id: str | None = None
     razorpay_payment_id: str | None = None
@@ -67,6 +71,8 @@ class ProductIn(BaseModel):
     discount: float = Field(default=0, ge=0)
     price: float = Field(ge=0)
     stock: int = Field(default=0, ge=0)
+    unit: str = Field(default="piece", max_length=40)
+    unit_size: str = Field(default="1 piece", max_length=80)
     sku: str = ""
     image: str = ""
     gallery: list[str] = []
@@ -101,6 +107,8 @@ def serialize_product(product: dict) -> dict:
         "discount": float(product.get("discount", 0) or 0),
         "price": float(product.get("price", 0)),
         "stock": int(product.get("stock", 0)),
+        "unit": product.get("unit", "piece"),
+        "unit_size": product.get("unit_size", "1 piece"),
         "sku": product.get("sku", ""),
         "image": product.get("image", ""),
         "gallery": product.get("gallery", []),
@@ -131,6 +139,9 @@ def serialize_order(order: dict) -> dict:
         "payment_status": order.get("payment_status"),
         "order_status": order.get("order_status"),
         "tracking": order.get("tracking", []),
+        "refund_status": order.get("refund_status", "none"),
+        "refund_requested_at": order.get("refund_requested_at"),
+        "refunded_at": order.get("refunded_at"),
         "transaction_id": order.get("transaction_id"),
         "created_at": order.get("created_at"),
     }
@@ -178,6 +189,17 @@ async def decrement_stock_atomic(cart: dict) -> None:
         for rollback_id, rollback_quantity in updated:
             await db.products.update_one({"_id": rollback_id}, {"$inc": {"stock": rollback_quantity}})
         raise HTTPException(status_code=409, detail=f"Insufficient stock for {item['product']['name']}")
+
+
+async def restore_stock(cart_or_order: dict) -> None:
+    for item in cart_or_order.get("items", []):
+        product_id = item.get("product", {}).get("id")
+        if not product_id:
+            continue
+        await db.products.update_one(
+            {"_id": object_id(product_id)},
+            {"$inc": {"stock": int(item.get("quantity", 0))}, "$set": {"updated_at": datetime.now(timezone.utc)}},
+        )
 
 
 def razorpay_credentials() -> tuple[str, str]:
@@ -599,6 +621,7 @@ async def checkout(payload: CheckoutAddress, user=Depends(get_current_user)):
     await decrement_stock_atomic(cart)
     now = datetime.now(timezone.utc)
     order_status = "paid" if payment_status == "paid" else "pending"
+    tracking_message = "Order placed with Cash on Delivery" if payment_method == "cash_on_delivery" else "Order received"
     order = {
         "user_id": str(user["_id"]),
         "user_email": user["email"],
@@ -611,7 +634,7 @@ async def checkout(payload: CheckoutAddress, user=Depends(get_current_user)):
         "payment_method": payment_method,
         "payment_status": payment_status,
         "order_status": order_status,
-        "tracking": [{"status": order_status, "message": "Order received", "at": now}],
+        "tracking": [{"status": order_status, "message": tracking_message, "at": now}],
         "transaction_id": transaction_id,
         "created_at": now,
         "updated_at": now,
@@ -638,18 +661,61 @@ async def my_orders(user=Depends(get_current_user)):
     return {"success": True, "items": [serialize_order(order) async for order in cursor]}
 
 
+@router.get("/orders/{order_id}")
+async def order_details(order_id: str, user=Depends(get_current_user)):
+    order = await db.orders.find_one({"_id": object_id(order_id), "user_id": str(user["_id"])})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return {"success": True, "order": serialize_order(order)}
+
+
 @router.delete("/orders/{order_id}")
 async def cancel_order(order_id: str, user=Depends(get_current_user)):
     order = await db.orders.find_one({"_id": object_id(order_id), "user_id": str(user["_id"])})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    if order.get("order_status") in {"shipped", "delivered"}:
+    if order.get("order_status") in {"shipped", "delivered", "refund_requested", "refunded", "cancelled"}:
         raise HTTPException(status_code=400, detail="Order can no longer be cancelled")
 
     now = datetime.now(timezone.utc)
+    await restore_stock(order)
     updated = await db.orders.find_one_and_update(
         {"_id": object_id(order_id)},
-        {"$set": {"order_status": "cancelled", "updated_at": now}, "$push": {"tracking": {"status": "cancelled", "message": "Cancelled by user", "at": now}}},
+        {
+            "$set": {
+                "order_status": "cancelled",
+                "payment_status": "cancelled" if order.get("payment_method") == "cash_on_delivery" else order.get("payment_status", "paid"),
+                "updated_at": now,
+            },
+            "$push": {"tracking": {"status": "cancelled", "message": "Cancelled by user. Stock restored.", "at": now}},
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+    return {"success": True, "order": serialize_order(updated)}
+
+
+@router.post("/orders/{order_id}/refund")
+async def request_refund(order_id: str, user=Depends(get_current_user)):
+    order = await db.orders.find_one({"_id": object_id(order_id), "user_id": str(user["_id"])})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("payment_method") != "razorpay" or order.get("payment_status") != "paid":
+        raise HTTPException(status_code=400, detail="Refund is available only for paid Razorpay orders")
+    if order.get("order_status") not in REFUNDABLE_STATUSES:
+        raise HTTPException(status_code=400, detail="Order is not eligible for refund")
+
+    now = datetime.now(timezone.utc)
+    updated = await db.orders.find_one_and_update(
+        {"_id": order["_id"]},
+        {
+            "$set": {
+                "order_status": "refund_requested",
+                "refund_status": "requested",
+                "refund_requested_at": now,
+                "updated_at": now,
+            },
+            "$push": {"tracking": {"status": "refund_requested", "message": "Refund requested. Admin will process manually.", "at": now}},
+        },
         return_document=ReturnDocument.AFTER,
     )
     return {"success": True, "order": serialize_order(updated)}

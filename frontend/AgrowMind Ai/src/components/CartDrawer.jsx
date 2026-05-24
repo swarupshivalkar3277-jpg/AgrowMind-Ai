@@ -19,7 +19,7 @@ export default function CartDrawer() {
               <img alt={item.product.name} src={item.product.image} />
               <div>
                 <strong>{item.product.name}</strong>
-                <span>Rs. {item.product.price}</span>
+                <span>Rs. {item.product.price} / {item.product.unit_size || item.product.unit || "piece"}</span>
                 <div className="quantityControl">
                   <button onClick={() => update(item.product.id, item.quantity - 1)} type="button">-</button>
                   <span>{item.quantity}</span>

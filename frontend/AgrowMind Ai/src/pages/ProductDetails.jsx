@@ -77,6 +77,7 @@ export default function ProductDetails() {
             {product.mrp > product.price && <span>MRP Rs. {product.mrp}</span>}
             <span>Rating {product.rating}/5</span>
             <span>{product.stock} in stock</span>
+            <span>{product.unit_size || product.unit || "1 piece"}</span>
             <span>Store: {product.seller_name}</span>
           </div>
           <div className="productTrustRow">

@@ -3,6 +3,7 @@ import csv
 import json
 import os
 import random
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +30,28 @@ EXPECTED_CLASS_COUNTS = {
     "mango": 8,
     "coconut": 6,
 }
+EXPECTED_CLASSES = {
+    "tomato": [
+        "Tomato___Bacterial_spot",
+        "Tomato___Early_blight",
+        "Tomato___healthy",
+        "Tomato___Late_blight",
+        "Tomato___Leaf_Mold",
+        "Tomato___Septoria_leaf_spot",
+        "Tomato___Spider_mites Two-spotted_spider_mite",
+        "Tomato___Target_Spot",
+        "Tomato___Tomato_mosaic_virus",
+        "Tomato___Tomato_Yellow_Leaf_Curl_Virus",
+    ],
+    "coconut": [
+        "CCI_Caterpillars",
+        "CCI_Leaflets",
+        "Healthy_Leaves",
+        "WCLWD_DryingofLeaflets",
+        "WCLWD_Flaccidity",
+        "WCLWD_Yellowing",
+    ],
+}
 
 
 def set_reproducibility(seed: int) -> None:
@@ -44,17 +67,48 @@ def count_images(dataset_dir: Path) -> dict[str, int]:
     return counts
 
 
-def validate_dataset(dataset_dir: Path) -> dict[str, int]:
+def save_dataset_audit(crop: str, counts: dict[str, int], min_images: int) -> Path:
+    TRAINING_DIR.mkdir(parents=True, exist_ok=True)
+    audit_path = TRAINING_DIR / f"{crop}_dataset_audit.json"
+    payload = {
+        "crop": crop,
+        "discovered_classes": sorted(counts),
+        "class_count": len(counts),
+        "image_counts": counts,
+        "total_images": sum(counts.values()),
+        "min_images_per_class": min_images,
+    }
+    audit_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return audit_path
+
+
+def validate_dataset(crop: str, dataset_dir: Path, min_images: int) -> dict[str, int]:
     if not dataset_dir.exists():
         raise FileNotFoundError(f"Dataset folder not found: {dataset_dir}")
 
     counts = count_images(dataset_dir)
+    audit_path = save_dataset_audit(crop, counts, min_images)
+    print(f"Discovered classes for {crop}: {sorted(counts)}")
+    print(f"Image counts for {crop}: {counts}")
+    print(f"Total images for {crop}: {sum(counts.values())}")
+    print(f"Dataset audit saved: {audit_path}")
+
+    expected = EXPECTED_CLASSES.get(crop)
+    if expected and sorted(counts) != sorted(expected):
+        raise ValueError(
+            f"{crop} dataset classes differ from expected classes. "
+            f"missing={sorted(set(expected) - set(counts))}, extra={sorted(set(counts) - set(expected))}"
+        )
+
     empty_classes = [name for name, count in counts.items() if count == 0]
+    small_classes = [name for name, count in counts.items() if count < min_images]
 
     if len(counts) < 2:
         raise ValueError(f"Need at least 2 class folders in {dataset_dir}")
     if empty_classes:
         raise ValueError(f"Empty class folders in {dataset_dir}: {empty_classes}")
+    if small_classes:
+        raise ValueError(f"Classes below minimum image count ({min_images}) in {dataset_dir}: {small_classes}")
     if sum(counts.values()) < 30:
         raise ValueError(
             f"Dataset is too small for training: {sum(counts.values())} images in {dataset_dir}"
@@ -85,6 +139,27 @@ def make_datasets(dataset_dir: Path, image_size: int, batch_size: int, seed: int
     )
 
     return train_ds, val_ds, train_ds.class_names
+
+
+def dataset_label_distribution(dataset, class_names: list[str]) -> dict[str, int]:
+    counts = {class_name: 0 for class_name in class_names}
+    for _, labels in dataset:
+        for label in labels.numpy().astype(int).tolist():
+            counts[class_names[label]] += 1
+    return counts
+
+
+def validate_split_integrity(train_ds, val_ds, class_names: list[str], crop: str) -> tuple[dict[str, int], dict[str, int]]:
+    train_counts = dataset_label_distribution(train_ds, class_names)
+    val_counts = dataset_label_distribution(val_ds, class_names)
+    print(f"Train distribution for {crop}: {train_counts}")
+    print(f"Validation distribution for {crop}: {val_counts}")
+
+    missing_train = [name for name, count in train_counts.items() if count == 0]
+    missing_val = [name for name, count in val_counts.items() if count == 0]
+    if missing_train or missing_val:
+        raise ValueError(f"{crop} split integrity failed. missing_train={missing_train}, missing_validation={missing_val}")
+    return train_counts, val_counts
 
 
 def compute_class_weights(counts: dict[str, int], class_names: list[str]) -> dict[int, float]:
@@ -187,6 +262,10 @@ def evaluate_model(model: tf.keras.Model, val_ds, class_names: list[str], output
             "support": int(matrix[index, :].sum()),
         }
 
+    zero_support = [class_name for class_name, metric in metrics.items() if metric["support"] == 0]
+    if zero_support:
+        raise ValueError(f"Evaluation failed because classes have zero validation support: {zero_support}")
+
     with (output_dir / "confusion_matrix.csv").open("w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         writer.writerow(["actual/predicted", *class_names])
@@ -209,6 +288,9 @@ def save_metadata(
     image_size: int,
     counts: dict[str, int],
     evaluation: dict,
+    train_distribution: dict[str, int],
+    validation_distribution: dict[str, int],
+    validation_accuracy: float,
 ) -> None:
     expected_count = EXPECTED_CLASS_COUNTS.get(crop)
     if expected_count is not None and len(class_names) != expected_count:
@@ -218,16 +300,28 @@ def save_metadata(
 
     CLASS_NAMES_DIR.mkdir(parents=True, exist_ok=True)
     with (CLASS_NAMES_DIR / f"{crop}_classes.json").open("w", encoding="utf-8") as file:
-        json.dump(class_names, file, indent=2)
+        json.dump({
+            "crop": crop,
+            "class_names": class_names,
+            "class_count": len(class_names),
+            "dataset_counts": counts,
+            "image_size": [image_size, image_size],
+            "training_date": datetime.now(timezone.utc).isoformat(),
+            "validation_accuracy": validation_accuracy,
+        }, file, indent=2)
 
     metadata = {
         "crop": crop,
         "model_file": model_path.name,
         "class_names": class_names,
+        "class_count": len(class_names),
         "image_size": [image_size, image_size],
         "input_scale": "model_includes_mobilenetv2_rescaling_-1_to_1",
         "temperature": 1.0,
         "dataset_counts": counts,
+        "train_distribution": train_distribution,
+        "validation_distribution": validation_distribution,
+        "validation_accuracy": validation_accuracy,
         "evaluation": evaluation,
     }
 
@@ -240,10 +334,11 @@ def train(args) -> None:
     TRAINING_DIR.mkdir(parents=True, exist_ok=True)
 
     dataset_dir = DATASETS_DIR / args.crop
-    counts = validate_dataset(dataset_dir)
+    counts = validate_dataset(args.crop, dataset_dir, args.min_images_per_class)
     print(f"Dataset counts for {args.crop}: {counts}")
 
     train_ds, val_ds, class_names = make_datasets(dataset_dir, args.image_size, args.batch_size, args.seed)
+    train_distribution, validation_distribution = validate_split_integrity(train_ds, val_ds, class_names, args.crop)
     class_weights = compute_class_weights(counts, class_names)
     print(f"Class order: {class_names}")
     print(f"Class weights: {class_weights}")
@@ -258,7 +353,7 @@ def train(args) -> None:
     model = build_model(len(class_names), args.image_size, args.dropout)
     compile_model(model, args.learning_rate)
 
-    model.fit(
+    history = model.fit(
         train_ds,
         validation_data=val_ds,
         epochs=args.epochs,
@@ -269,7 +364,7 @@ def train(args) -> None:
     if args.fine_tune_epochs > 0:
         unfreeze_for_fine_tuning(model, args.train_last_layers)
         compile_model(model, args.fine_tune_learning_rate)
-        model.fit(
+        fine_tune_history = model.fit(
             train_ds,
             validation_data=val_ds,
             epochs=args.epochs + args.fine_tune_epochs,
@@ -277,19 +372,35 @@ def train(args) -> None:
             class_weight=class_weights,
             callbacks=make_callbacks(model_path),
         )
+        for key, values in fine_tune_history.history.items():
+            history.history.setdefault(key, []).extend(values)
 
     model = tf.keras.models.load_model(model_path, compile=False)
+    output_neurons = int(model.output_shape[-1])
+    if output_neurons != len(class_names):
+        raise ValueError(f"{args.crop} saved model output neurons {output_neurons} != class count {len(class_names)}")
+
     evaluation = evaluate_model(model, val_ds, class_names, TRAINING_DIR)
-    save_metadata(args.crop, model_path, class_names, args.image_size, counts, evaluation)
+    validation_accuracy = float(max(history.history.get("val_accuracy", [0.0])))
+    (TRAINING_DIR / f"{args.crop}_training_history.json").write_text(json.dumps(history.history, indent=2), encoding="utf-8")
+    save_metadata(args.crop, model_path, class_names, args.image_size, counts, evaluation, train_distribution, validation_distribution, validation_accuracy)
 
     if args.save_h5:
         model.save(legacy_model_path)
-        save_metadata(args.crop, legacy_model_path, class_names, args.image_size, counts, evaluation)
+        save_metadata(args.crop, legacy_model_path, class_names, args.image_size, counts, evaluation, train_distribution, validation_distribution, validation_accuracy)
 
     print(f"Saved model: {model_path}")
     print(f"Saved metadata: {model_path.with_suffix('.json')}")
     print(f"Saved class names: {CLASS_NAMES_DIR / f'{args.crop}_classes.json'}")
     print(f"Saved confusion matrix: {TRAINING_DIR / 'confusion_matrix.csv'}")
+    print("TRAINING SUMMARY")
+    print(f"Crop: {args.crop}")
+    print(f"Detected Classes: {class_names}")
+    print(f"Image Count: {sum(counts.values())}")
+    print(f"Output Neurons: {output_neurons}")
+    print(f"Validation Accuracy: {validation_accuracy:.4f}")
+    print(f"Class Count Match: {output_neurons == len(class_names)}")
+    print("Deployment Ready: YES")
 
 
 def parse_args():
@@ -305,6 +416,7 @@ def parse_args():
     parser.add_argument("--dropout", type=float, default=0.35)
     parser.add_argument("--seed", type=int, default=SEED)
     parser.add_argument("--save-h5", action="store_true", help="Also save a legacy .h5 copy.")
+    parser.add_argument("--min-images-per-class", type=int, default=20)
     return parser.parse_args()
 
 

@@ -186,6 +186,10 @@ export function cancelOrder(orderId) {
   return api.delete(`/marketplace/orders/${orderId}`);
 }
 
+export function requestOrderRefund(orderId) {
+  return api.post(`/marketplace/orders/${orderId}/refund`);
+}
+
 export function getAdminOrders() {
   return cachedGet("/admin/orders");
 }
