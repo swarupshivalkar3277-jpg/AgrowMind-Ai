@@ -7,10 +7,20 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { CartProvider } from "./context/CartContext";
 import AdminDashboard from "./pages/AdminDashboard";
+import AdminAnalytics from "./pages/admin/AdminAnalytics";
+import AdminOrders from "./pages/admin/AdminOrders";
+import AdminPredictions from "./pages/admin/AdminPredictions";
+import AdminProductForm from "./pages/admin/AdminProductForm";
+import AdminProducts from "./pages/admin/AdminProducts";
+import AdminReports from "./pages/admin/AdminReports";
+import AdminSettings from "./pages/admin/AdminSettings";
+import AdminUsers from "./pages/admin/AdminUsers";
 import AnalyticsPage from "./pages/AnalyticsPage";
+import AssistantPage from "./pages/AssistantPage";
 import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import Dashboard from "./pages/Dashboard";
+import DiagnosePage from "./pages/DiagnosePage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import Home from "./pages/Home";
 import HistoryPage from "./pages/HistoryPage";
@@ -22,6 +32,8 @@ import PaymentStatus from "./pages/PaymentStatus";
 import ProductDetails from "./pages/ProductDetails";
 import Register from "./pages/Register";
 import SettingsPage from "./pages/SettingsPage";
+import ReportsPage from "./pages/ReportsPage";
+import WeatherPage from "./pages/WeatherPage";
 import WishlistPage from "./pages/WishlistPage";
 
 function LoadingScreen({ label = "Loading secure workspace..." }) {
@@ -89,17 +101,31 @@ function AppRoutes() {
         <Route path="/forgot-password" element={<PublicOnly><main className="authPage"><ForgotPasswordPage /></main></PublicOnly>} />
         <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/diagnose" element={<DiagnosePage />} />
           <Route path="/cart" element={<Cart />} />
           <Route path="/checkout" element={<Checkout />} />
           <Route path="/orders" element={<Orders />} />
           <Route path="/wishlist" element={<WishlistPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/weather" element={<WeatherPage />} />
+          <Route path="/assistant" element={<AssistantPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
           <Route path="/settings" element={<SettingsPage darkMode={darkMode} onToggleTheme={() => setDarkMode((value) => !value)} />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/payment/success" element={<PaymentStatus success />} />
           <Route path="/payment/failed" element={<PaymentStatus success={false} />} />
-          <Route path="/admin" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin" element={<Navigate replace to="/admin/dashboard" />} />
+          <Route path="/admin/dashboard" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
+          <Route path="/admin/users" element={<ProtectedRoute adminOnly><AdminUsers /></ProtectedRoute>} />
+          <Route path="/admin/products" element={<ProtectedRoute adminOnly><AdminProducts /></ProtectedRoute>} />
+          <Route path="/admin/products/add" element={<ProtectedRoute adminOnly><AdminProductForm /></ProtectedRoute>} />
+          <Route path="/admin/products/edit/:id" element={<ProtectedRoute adminOnly><AdminProductForm /></ProtectedRoute>} />
+          <Route path="/admin/orders" element={<ProtectedRoute adminOnly><AdminOrders /></ProtectedRoute>} />
+          <Route path="/admin/predictions" element={<ProtectedRoute adminOnly><AdminPredictions /></ProtectedRoute>} />
+          <Route path="/admin/analytics" element={<ProtectedRoute adminOnly><AdminAnalytics /></ProtectedRoute>} />
+          <Route path="/admin/reports" element={<ProtectedRoute adminOnly><AdminReports /></ProtectedRoute>} />
+          <Route path="/admin/settings" element={<ProtectedRoute adminOnly><AdminSettings /></ProtectedRoute>} />
         </Route>
       </Routes>
       <Toaster position="top-right" toastOptions={{ className: "toast" }} />

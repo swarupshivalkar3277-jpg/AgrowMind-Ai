@@ -17,6 +17,8 @@ export default function Marketplace() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState(params.get("search") || "");
+  const [sort, setSort] = useState("featured");
+  const [maxPrice, setMaxPrice] = useState("");
   const category = params.get("category") || "";
   const crop = params.get("crop") || "";
   const disease = params.get("disease") || "";
@@ -39,6 +41,14 @@ export default function Marketplace() {
     else next.delete(key);
     setParams(next);
   }
+
+  const visibleProducts = useMemo(() => {
+    let next = products.filter((product) => !maxPrice || Number(product.price || 0) <= Number(maxPrice));
+    if (sort === "price_low") next = [...next].sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
+    if (sort === "price_high") next = [...next].sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
+    if (sort === "rating") next = [...next].sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0));
+    return next;
+  }, [maxPrice, products, sort]);
 
   return (
     <main className="publicPage">
@@ -65,14 +75,25 @@ export default function Marketplace() {
           <option value="">All crops</option>
           {crops.map((item) => <option key={item} value={item}>{item}</option>)}
         </select>
-        {(disease || category || crop || search) && <button className="secondaryButton" onClick={() => { setSearch(""); setParams({}); }} type="button"><SlidersHorizontal size={17} /> Clear</button>}
+        <input min="0" onChange={(event) => setMaxPrice(event.target.value)} placeholder="Max price" type="number" value={maxPrice} />
+        <select onChange={(event) => setSort(event.target.value)} value={sort}>
+          <option value="featured">Featured</option>
+          <option value="rating">Top rated</option>
+          <option value="price_low">Price low to high</option>
+          <option value="price_high">Price high to low</option>
+        </select>
+        {(disease || category || crop || search || maxPrice) && <button className="secondaryButton" onClick={() => { setSearch(""); setMaxPrice(""); setParams({}); }} type="button"><SlidersHorizontal size={17} /> Clear</button>}
       </section>
       {disease && <p className="recommendationNote">Showing products related to {disease.replaceAll("_", " ")}.</p>}
+      <section className="sectionHeader marketSectionHeader">
+        <div><span className="eyebrowText">Featured Products</span><h2>Recommended farm inputs</h2></div>
+        <span className="mutedText">{visibleProducts.length} products</span>
+      </section>
       <section className="productGrid">
         {loading && Array.from({ length: 8 }).map((_, index) => <div className="productSkeleton" key={index} />)}
-        {!loading && products.map((product) => <ProductCard key={product.id} product={product} />)}
+        {!loading && visibleProducts.map((product) => <ProductCard key={product.id} product={product} />)}
       </section>
-      {!loading && products.length === 0 && <div className="emptyMarket">No products found.</div>}
+      {!loading && visibleProducts.length === 0 && <div className="emptyMarket">No products found.</div>}
       </div>
     </main>
   );

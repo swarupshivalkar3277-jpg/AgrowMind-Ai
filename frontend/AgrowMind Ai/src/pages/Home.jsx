@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { BrainCircuit, Leaf, ScanSearch, ShoppingBag, ShieldCheck, Truck } from "lucide-react";
+import { BrainCircuit, CloudSun, Leaf, ScanSearch, ShoppingBag, ShieldCheck, Star, Truck } from "lucide-react";
 
 import PublicNav from "../components/PublicNav";
 import { useAuth } from "../context/AuthContext";
@@ -87,6 +87,36 @@ export default function Home() {
           </p>
         </div>
         <Link className="primaryButton" to="/marketplace">Explore Products</Link>
+      </section>
+
+      <section className="featureBand" aria-label="Platform statistics">
+        {[
+          ["3 crops", "Tomato, mango, and coconut disease intelligence."],
+          ["Secure payments", "Razorpay checkout with stock reduction after verification."],
+          ["Admin ops", "Users, products, orders, analytics, and reports."],
+        ].map(([title, text]) => <article className="featureCard statFeature" key={title}><Star size={24} /><h2>{title}</h2><p>{text}</p></article>)}
+      </section>
+
+      <section className="diseaseIntro">
+        <div>
+          <span className="eyebrowText">Weather intelligence</span>
+          <h2>Field decisions that adapt to changing conditions.</h2>
+          <p>Humidity, rain probability, wind, temperature, and warnings help farmers time treatments and reduce disease spread.</p>
+        </div>
+        <div className="diseaseSteps">
+          <span><CloudSun size={18} /> 7-day forecast</span>
+          <span><Leaf size={18} /> Crop advisory</span>
+          <span><ShieldCheck size={18} /> Risk warnings</span>
+        </div>
+      </section>
+
+      <section className="marketPreview">
+        <div>
+          <span className="eyebrowText">FAQ</span>
+          <h2>Built for real farmer workflows, not demos.</h2>
+          <p>Farmers can diagnose, review history, buy products, track orders, export reports, and ask the assistant within a few taps.</p>
+        </div>
+        <Link className="primaryButton" to={isAuthenticated ? "/diagnose" : "/register"}>Try Disease Detection</Link>
       </section>
 
       <footer className="siteFooter">

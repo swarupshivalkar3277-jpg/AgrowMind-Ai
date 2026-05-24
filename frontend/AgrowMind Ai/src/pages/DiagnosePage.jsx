@@ -1,0 +1,125 @@
+import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
+import { Camera, ImagePlus, Sparkles } from "lucide-react";
+import toast from "react-hot-toast";
+
+import PredictionResultCard from "../components/PredictionResultCard";
+import UploadBox from "../components/UploadBox";
+import { useAuth } from "../context/AuthContext";
+import api, { getHistory } from "../services/authService";
+import { downloadPredictionReport } from "../utils/reportPdf";
+
+const crops = [
+  { value: "tomato", label: "Tomato" },
+  { value: "mango", label: "Mango" },
+  { value: "coconut", label: "Coconut" },
+];
+
+function normalizeError(error) {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (detail?.error) return detail.error;
+  if (Array.isArray(detail)) return detail.map((item) => item.msg).filter(Boolean).join(", ");
+  return error?.message || "Prediction failed";
+}
+
+export default function DiagnosePage() {
+  const { user } = useAuth();
+  const [crop, setCrop] = useState("tomato");
+  const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => () => previewUrl && URL.revokeObjectURL(previewUrl), [previewUrl]);
+
+  function handleFileChange(event) {
+    const selected = event.target.files?.[0];
+    if (!selected) return;
+    if (!selected.type.startsWith("image/")) {
+      setError("Please upload a valid image file.");
+      return;
+    }
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setFile(selected);
+    setPreviewUrl(URL.createObjectURL(selected));
+    setResult(null);
+    setError("");
+  }
+
+  async function handlePredict(event) {
+    event.preventDefault();
+    if (!file) {
+      setError("Please upload or capture a crop leaf image.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    setLoading(true);
+    setError("");
+
+    try {
+      const { data } = await api.post(`/predict/${crop}`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setResult({ ...data, created_at: new Date().toISOString() });
+      getHistory().catch(() => null);
+      toast.success("Prediction completed");
+    } catch (err) {
+      const message = normalizeError(err);
+      setError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="pageStack">
+      <motion.section className="pageHero compactHero flagshipHero" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+        <div>
+          <span className="eyebrowText">AI Disease Detection</span>
+          <h1>Diagnose crop health from a single leaf image.</h1>
+          <p>Upload from gallery or camera, watch the scan progress, then get treatment, prevention, severity, and matched marketplace inputs.</p>
+          <div className="heroMeta">
+            <span><ImagePlus size={17} /> Gallery upload</span>
+            <span><Camera size={17} /> Camera capture</span>
+            <span><Sparkles size={17} /> AI recommendations</span>
+          </div>
+        </div>
+      </motion.section>
+
+      <section className="diagnoseGrid">
+        <UploadBox
+          crop={crop}
+          crops={crops}
+          error={error}
+          file={file}
+          loading={loading}
+          onCrop={setCrop}
+          onFile={handleFileChange}
+          onSubmit={handlePredict}
+          previewUrl={previewUrl}
+        />
+        <div className="predictionPanel">
+          {loading ? (
+            <div className="analysisLoader premiumLoader">
+              <span />
+              <strong>Processing leaf image...</strong>
+              <p>Running disease classification, severity scoring, and product matching.</p>
+              <div className="skeletonStack"><i /><i /><i /></div>
+            </div>
+          ) : (
+            <PredictionResultCard
+              crop={result?.crop || crop}
+              onDownload={() => downloadPredictionReport({ user, crop: result.crop, prediction: result.prediction, createdAt: result.created_at })}
+              prediction={result?.prediction}
+            />
+          )}
+        </div>
+      </section>
+    </main>
+  );
+}

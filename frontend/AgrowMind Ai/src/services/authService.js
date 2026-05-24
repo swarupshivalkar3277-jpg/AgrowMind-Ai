@@ -177,6 +177,10 @@ export function blockAdminUser(userId, blocked) {
   return api.patch(`/admin/users/${userId}/block`, { blocked });
 }
 
+export function updateAdminUserRole(userId, role) {
+  return api.patch(`/admin/users/${userId}/role`, { role });
+}
+
 export function createAdminProduct(payload) {
   return api.post("/admin/products", payload);
 }

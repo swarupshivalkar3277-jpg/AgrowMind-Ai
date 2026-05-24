@@ -59,10 +59,23 @@ class ProductIn(BaseModel):
     category: str
     crop_type: list[str] = []
     disease_tags: list[str] = []
+    brand: str = ""
+    manufacturer: str = ""
+    mrp: float = Field(default=0, ge=0)
+    discount: float = Field(default=0, ge=0)
     price: float = Field(ge=0)
     stock: int = Field(default=0, ge=0)
+    sku: str = ""
     image: str = ""
+    gallery: list[str] = []
+    short_description: str = ""
     description: str = ""
+    benefits: list[str] = []
+    usage_instructions: str = ""
+    precautions: str = ""
+    tags: list[str] = []
+    featured: bool = False
+    status: str = Field(default="active", pattern="^(active|draft|archived)$")
     rating: float = Field(default=4.0, ge=0, le=5)
 
 
@@ -80,10 +93,23 @@ def serialize_product(product: dict) -> dict:
         "category": product.get("category"),
         "crop_type": product.get("crop_type", []),
         "disease_tags": product.get("disease_tags", []),
+        "brand": product.get("brand", ""),
+        "manufacturer": product.get("manufacturer", ""),
+        "mrp": float(product.get("mrp", product.get("price", 0)) or 0),
+        "discount": float(product.get("discount", 0) or 0),
         "price": float(product.get("price", 0)),
         "stock": int(product.get("stock", 0)),
+        "sku": product.get("sku", ""),
         "image": product.get("image", ""),
+        "gallery": product.get("gallery", []),
+        "short_description": product.get("short_description", ""),
         "description": product.get("description", ""),
+        "benefits": product.get("benefits", []),
+        "usage_instructions": product.get("usage_instructions", ""),
+        "precautions": product.get("precautions", ""),
+        "tags": product.get("tags", []),
+        "featured": bool(product.get("featured", False)),
+        "status": product.get("status", "active"),
         "rating": float(product.get("rating", 0)),
         "seller_id": product.get("seller_id"),
         "seller_name": product.get("seller_name", "AgroMind Store"),
@@ -608,4 +634,3 @@ async def cancel_order(order_id: str, user=Depends(get_current_user)):
         return_document=ReturnDocument.AFTER,
     )
     return {"success": True, "order": serialize_order(updated)}
-

@@ -12,10 +12,11 @@ export default function UserDropdown({ user }) {
     <div className="dropdownWrap">
       <button className="avatarButton" onClick={() => setOpen((value) => !value)} type="button">{initials}</button>
       {open && (
-        <div className="dropdownPanel userPanel">
+        <div className="dropdownPanel userPanel" role="menu">
           <strong>{user?.name || "AgroMind User"}</strong>
           <small>{user?.email}</small>
           <Link to="/settings">Settings</Link>
+          <Link to="/reports">Reports</Link>
           <button onClick={logout} type="button">Logout</button>
         </div>
       )}

@@ -38,6 +38,7 @@ export default function ProductDetails() {
   }
 
   const image = product.image || "https://images.unsplash.com/photo-1464226184884-fa280b87c399?auto=format&fit=crop&w=1200&q=80";
+  const gallery = [image, ...(product.gallery || [])].filter(Boolean).slice(0, 6);
 
   return (
     <main className="publicPage">
@@ -47,16 +48,17 @@ export default function ProductDetails() {
         <div>
           <img alt={product.name} className="mainProductImage" src={image} />
           <div className="galleryRail">
-            {[image, image, image].map((item, index) => <img alt={`${product.name} ${index + 1}`} key={index} src={item} />)}
+            {gallery.map((item, index) => <img alt={`${product.name} ${index + 1}`} key={index} src={item} />)}
           </div>
         </div>
         <div>
           <Link className="backButton" to="/marketplace">Back to Marketplace</Link>
           <span className="productCategory">{product.category}</span>
           <h1>{product.name}</h1>
-          <p>{product.description}</p>
+          <p>{product.short_description || product.description}</p>
           <div className="productMeta detailMeta">
             <strong>Rs. {product.price}</strong>
+            {product.mrp > product.price && <span>MRP Rs. {product.mrp}</span>}
             <span>Rating {product.rating}/5</span>
             <span>{product.stock} in stock</span>
             <span>Store: {product.seller_name}</span>
@@ -74,6 +76,12 @@ export default function ProductDetails() {
               {product.stock <= 0 ? "Out of Stock" : isAuthenticated ? "Buy Now" : "Login to Checkout"}
             </button>
           </div>
+          <section className="productInfoTabs">
+            <article><h2>Description</h2><p>{product.description || product.short_description}</p></article>
+            <article><h2>Benefits</h2><ul>{(product.benefits || []).map((item) => <li key={item}>{item}</li>)}</ul></article>
+            <article><h2>Usage</h2><p>{product.usage_instructions || "Follow label instructions and local agricultural guidance."}</p></article>
+            <article><h2>Precautions</h2><p>{product.precautions || "Use protective equipment and avoid over-application."}</p></article>
+          </section>
           <section className="reviewsBox">
             <h2>Reviews</h2>
             <p>Verified customer reviews, product questions, and related products will appear here.</p>

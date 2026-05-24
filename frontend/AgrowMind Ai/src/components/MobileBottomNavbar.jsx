@@ -1,12 +1,12 @@
 import { NavLink } from "react-router-dom";
-import { BarChart3, History, Home, ShoppingBag, ShoppingCart } from "lucide-react";
+import { History, Home, ScanSearch, ShoppingBag, UserRound } from "lucide-react";
 
 const items = [
   { to: "/dashboard", label: "Home", icon: Home },
-  { to: "/marketplace", label: "Shop", icon: ShoppingBag },
+  { to: "/diagnose", label: "Diagnose", icon: ScanSearch },
+  { to: "/marketplace", label: "Market", icon: ShoppingBag },
   { to: "/history", label: "History", icon: History },
-  { to: "/analytics", label: "Stats", icon: BarChart3 },
-  { to: "/cart", label: "Cart", icon: ShoppingCart },
+  { to: "/settings", label: "Profile", icon: UserRound },
 ];
 
 export default function MobileBottomNavbar() {

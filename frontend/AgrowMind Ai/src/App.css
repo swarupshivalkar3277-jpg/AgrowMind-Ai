@@ -1,17 +1,20 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
 
 :root {
-  --bg: #f5faf7;
+  --bg: #F8FAFC;
   --surface: rgba(255, 255, 255, 0.82);
   --surface-strong: #ffffff;
   --text: #0f172a;
   --muted: #64748b;
   --border: rgba(15, 23, 42, 0.1);
   --green: #16a34a;
+  --secondary: #22C55E;
+  --accent: #84CC16;
   --emerald: #10b981;
+  --warning: #F59E0B;
+  --danger: #EF4444;
   --teal: #0d9488;
   --blue: #2563eb;
-  --danger: #dc2626;
   --shadow: 0 20px 55px rgba(15, 23, 42, 0.09);
   --soft-shadow: 0 10px 30px rgba(15, 23, 42, 0.07);
   --radius: 8px;
@@ -789,6 +792,308 @@ body.dark .topSearch { background: rgba(15, 23, 42, 0.58); }
   color: var(--text);
 }
 
+.quickActionGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.quickActionCard {
+  min-height: 96px;
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  box-shadow: var(--soft-shadow);
+  color: var(--text);
+  font-weight: 900;
+  text-align: center;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.quickActionCard:hover, .productCard:hover, .reportCard:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow);
+}
+
+.quickActionCard svg, .reportCard svg, .forecastCard svg {
+  color: var(--green);
+}
+
+.overviewGrid, .diagnoseGrid, .assistantLayout, .analyticsGrid, .productEditorGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.overviewGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.softPanel, .formPanel, .chartPanel, .toolbarPanel, .advisoryPanel {
+  padding: 20px;
+}
+
+.activityList {
+  display: grid;
+  gap: 10px;
+}
+
+.activityList article, .adminTable article, .historyTableRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+}
+
+.activityList article {
+  grid-template-columns: 1fr;
+}
+
+.activityList span, .adminTable span, .forecastCard small, .reportCard p {
+  color: var(--muted);
+}
+
+.emptyState {
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.premiumLoader .skeletonStack {
+  width: min(420px, 80vw);
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.skeletonStack i {
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.12), rgba(132, 204, 22, 0.28), rgba(16, 185, 129, 0.12));
+  animation: pulse 0.9s ease-in-out infinite alternate;
+}
+
+.productEditorGrid {
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+.formPanel {
+  display: grid;
+  gap: 14px;
+}
+
+.formPanel label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.toggleField {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.toggleField input {
+  width: 20px;
+  min-height: 20px;
+}
+
+.imageDrop {
+  min-height: 220px;
+}
+
+.galleryEditor, .forecastGrid, .reportGrid, .adminProductGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.galleryEditor {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.gallerySlot {
+  min-height: 190px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: rgba(248, 250, 252, 0.8);
+}
+
+.gallerySlot > input[type="file"] {
+  display: none;
+}
+
+.gallerySlot img {
+  width: 100%;
+  height: 110px;
+  object-fit: cover;
+  border-radius: var(--radius);
+}
+
+.productPreviewPanel {
+  position: sticky;
+  top: 96px;
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.previewCard {
+  min-height: auto;
+}
+
+.adminProductGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.adminProductCard .productActions a, .adminProductCard .productActions button {
+  min-height: 42px;
+}
+
+.dangerText {
+  color: var(--danger);
+}
+
+.toolbarPanel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.adminTable {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.assistantLayout {
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.assistantSidebar {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+}
+
+.assistantSidebar .secondaryButton {
+  justify-content: flex-start;
+  text-align: left;
+  height: auto;
+  min-height: 48px;
+}
+
+.chatPanel {
+  min-height: 560px;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 14px;
+  padding: 18px;
+}
+
+.chatMessages {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.assistantBubble, .userBubble {
+  width: min(620px, 100%);
+  display: flex;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius);
+  line-height: 1.6;
+}
+
+.assistantBubble {
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.userBubble {
+  justify-self: end;
+  background: rgba(15, 23, 42, 0.07);
+}
+
+.chatInput {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
+.chatInput button {
+  width: 48px;
+  border-radius: var(--radius);
+  color: white;
+  background: var(--green);
+}
+
+.forecastCard, .reportCard {
+  min-height: 170px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 18px;
+}
+
+.reportGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.productInfoTabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.productInfoTabs article {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.productInfoTabs ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.historyGrid.timeline .historyCard {
+  border-left: 4px solid var(--green);
+}
+
+.marketSectionHeader {
+  padding: 0 4px;
+}
+
+.dropdownPanel.userPanel {
+  max-width: min(300px, calc(100vw - 24px));
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1120px) {
   .appShell { grid-template-columns: 1fr; }
   .sidebar {
@@ -802,8 +1107,9 @@ body.dark .topSearch { background: rgba(15, 23, 42, 0.58); }
   .sidebar.open { transform: translateX(0); }
   .sidebarScrim.show { display: block; position: fixed; inset: 0; z-index: 45; background: rgba(2, 6, 23, 0.42); }
   .mobileOnly { display: inline-grid; }
-  .statsGrid, .productGrid, .productGrid.compact, .featureBand { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .dashboardGrid, .productDetail, .cartLayout, .checkoutGrid, .adminGrid { grid-template-columns: 1fr; }
+  .statsGrid, .productGrid, .productGrid.compact, .featureBand, .quickActionGrid, .overviewGrid, .adminProductGrid, .reportGrid, .forecastGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboardGrid, .productDetail, .cartLayout, .checkoutGrid, .adminGrid, .diagnoseGrid, .assistantLayout, .analyticsGrid, .productEditorGrid { grid-template-columns: 1fr; }
+  .productPreviewPanel { position: static; }
   .chartCard { grid-column: auto; }
 }
 
@@ -818,11 +1124,11 @@ body.dark .topSearch { background: rgba(15, 23, 42, 0.58); }
   }
   .dashboardHero h1, .pageHero h1, .marketHero h1 { font-size: clamp(2.1rem, 12vw, 3.6rem); }
   .profileSummary { width: 100%; }
-  .statsGrid, .productGrid, .productGrid.compact, .miniProductGrid, .aiAdviceGrid, .insightGrid, .settingsGrid, .marketFilters, .filterBar {
+  .statsGrid, .productGrid, .productGrid.compact, .miniProductGrid, .aiAdviceGrid, .insightGrid, .settingsGrid, .marketFilters, .filterBar, .quickActionGrid, .overviewGrid, .adminProductGrid, .reportGrid, .forecastGrid, .galleryEditor, .formRow, .toolbarPanel, .productInfoTabs {
     grid-template-columns: 1fr;
   }
   .recoveryStrip, .recommendationBand { grid-template-columns: 1fr; }
-  .cartItem, .cartItem.large, .orderCard, .historyCard, .adminList article { grid-template-columns: 1fr; }
+  .cartItem, .cartItem.large, .orderCard, .historyCard, .adminList article, .adminTable article, .historyTableRow, .activityList article { grid-template-columns: 1fr; }
   .historyMetrics { text-align: left; }
   .historyActions { justify-content: flex-start; }
   .otpRow { grid-template-columns: 1fr; }
@@ -873,4 +1179,25 @@ body.dark .topSearch { background: rgba(15, 23, 42, 0.58); }
     font-weight: 800;
   }
   .mobileBottomNav a.active { color: var(--green); background: rgba(16, 185, 129, 0.12); }
+  .topbarRight { margin-left: auto; }
+  .dropdownWrap { position: static; }
+  .dropdownPanel {
+    position: fixed;
+    top: 78px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+  .sidebar {
+    padding-bottom: 92px;
+  }
+  .sidebarNav {
+    padding-bottom: 12px;
+  }
+  .logoutButton {
+    position: sticky;
+    bottom: 0;
+    min-width: 0;
+    background: var(--surface-strong);
+  }
 }
