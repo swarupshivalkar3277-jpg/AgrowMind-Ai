@@ -25,7 +25,9 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: FRONTEND_URL
-        value: https://agrowmindai.vercel.app
+        value: https://agromindai.in
+      - key: ALLOWED_ORIGINS
+        value: https://agrowmindai.vercel.app,https://agromindai.in,https://www.agromindai.in
       - key: TRUSTED_HOSTS
         value: agromind-ai-api.onrender.com,*.onrender.com,localhost,127.0.0.1
       - key: RAZORPAY_KEY_ID
@@ -43,7 +45,7 @@ services:
       - key: GOOGLE_CLIENT_SECRET
         sync: false
       - key: GOOGLE_REDIRECT_URI
-        value: https://agromind-ai-api.onrender.com/auth/google/callback
+        value: https://agrowmind-ai.onrender.com/auth/google/callback
       - key: MODEL_DIRS
         sync: false
       - key: MODEL_BASE_URL

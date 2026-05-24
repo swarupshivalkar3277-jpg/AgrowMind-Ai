@@ -127,6 +127,11 @@ def _csv_env(name: str) -> list[str]:
 
 
 ENVIRONMENT = os.getenv("ENVIRONMENT", os.getenv("ENV", "development")).lower()
+PRODUCTION_FRONTEND_ORIGINS = [
+    "https://agrowmindai.vercel.app",
+    "https://agromindai.in",
+    "https://www.agromindai.in",
+]
 DEFAULT_ORIGINS = []
 if ENVIRONMENT != "production":
     DEFAULT_ORIGINS = [
@@ -137,9 +142,12 @@ if ENVIRONMENT != "production":
     ]
 ALLOWED_ORIGINS = sorted(set(
     DEFAULT_ORIGINS
-    + ["https://agrowmindai.vercel.app"]
+    + PRODUCTION_FRONTEND_ORIGINS
     + _csv_env("FRONTEND_URL")
-    + ([] if ENVIRONMENT == "production" else _csv_env("CORS_ORIGINS") + _csv_env("FRONTEND_ORIGINS") + _csv_env("FRONTEND_ORIGIN"))
+    + _csv_env("FRONTEND_ORIGIN")
+    + _csv_env("FRONTEND_ORIGINS")
+    + _csv_env("CORS_ORIGINS")
+    + _csv_env("ALLOWED_ORIGINS")
 ))
 
 logger.info("Allowed CORS origins: %s", ALLOWED_ORIGINS)
@@ -166,14 +174,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=[
-        "GET",
-        "POST",
-        "PUT",
-        "DELETE",
-        "OPTIONS",
-        "PATCH",
-    ],
+    allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
 )

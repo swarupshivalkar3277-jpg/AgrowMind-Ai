@@ -52,7 +52,11 @@ export function loginUser(payload) {
 }
 
 export function sendOtp(payload) {
-  return api.post("/auth/send-otp", payload);
+  return api.post("/auth/send-otp", payload, {
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
 }
 
 export function forgotPassword(payload) {
@@ -60,7 +64,11 @@ export function forgotPassword(payload) {
 }
 
 export function googleAuth(payload) {
-  return api.post("/auth/google", payload);
+  return api.post("/auth/google", payload, {
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
 }
 
 export function logoutUser() {
