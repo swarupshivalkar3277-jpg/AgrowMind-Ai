@@ -54,8 +54,12 @@ venv/
 *.ckpt
 *.pb
 
-# Ignore training model folder
-backend/training/
+# Ignore ad hoc training outputs but allow deployed model artifacts/metadata.
+backend/training/*
+!backend/training/*_model.keras
+!backend/training/*_model.json
+!backend/training/class_names/
+!backend/training/class_names/*.json
 
 # =========================
 # Dataset folders
@@ -92,3 +96,4 @@ frontend/AgrowMind Ai/.env.production
 # Documents
 *.docx
 *.pub
+echo backend/training/*.keras >> .gitignore

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -10,7 +11,12 @@ RECOMMENDATIONS_PATH = BASE_DIR / "data" / "recommendations.json"
 
 
 def normalize_key(value: str | None) -> str:
-    return (value or "").strip().lower().replace(" ", "_")
+    normalized = (value or "").strip()
+    if "___" in normalized:
+        normalized = normalized.split("___", 1)[1]
+    normalized = normalized.replace("-", " ")
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", normalized.lower())
+    return re.sub(r"_+", "_", normalized).strip("_")
 
 
 @lru_cache(maxsize=1)
@@ -28,12 +34,17 @@ def recommendation_for(crop: str, disease: str) -> dict:
     recommendation = crop_data.get(disease_key) or data.get("default", {})
 
     return {
+        "display_name": recommendation.get("display_name") or disease.replace("_", " ").strip().title(),
         "severity": recommendation.get("severity", "Medium"),
         "fertilizer": recommendation.get("fertilizer", []),
+        "symptoms": recommendation.get("symptoms", []),
+        "causes": recommendation.get("causes", []),
         "treatment": recommendation.get("treatment", []),
+        "chemical_solutions": recommendation.get("chemical_solutions", []),
         "irrigation": recommendation.get("irrigation", ""),
         "prevention": recommendation.get("prevention", []),
-        "organic_solution": recommendation.get("organic_solution", []),
+        "organic_solutions": recommendation.get("organic_solutions", recommendation.get("organic_solution", [])),
+        "recommended_products": recommendation.get("recommended_products", []),
         "harvest_risk": recommendation.get("harvest_risk", "Moderate"),
     }
 
@@ -44,8 +55,22 @@ def enrich_prediction(crop: str, prediction: dict) -> dict:
 
     disease = prediction.get("disease") or prediction.get("prediction")
     recommendations = recommendation_for(crop, disease)
+    recommendation_payload = {
+        "severity": recommendations["severity"],
+        "symptoms": recommendations["symptoms"],
+        "causes": recommendations["causes"],
+        "treatment": recommendations["treatment"],
+        "organic_solutions": recommendations["organic_solutions"],
+        "chemical_solutions": recommendations["chemical_solutions"],
+        "prevention": recommendations["prevention"],
+        "recommended_products": recommendations["recommended_products"],
+    }
 
     return {
         **prediction,
+        "class_name": disease,
+        "disease": recommendations["display_name"],
         **recommendations,
+        "organic_solution": recommendations["organic_solutions"],
+        "recommendation": recommendation_payload,
     }

@@ -1,0 +1,27 @@
+{
+  "crop": "coconut",
+  "model_file": "coconut_model.keras",
+  "class_names": [
+    "CCI_Caterpillars",
+    "CCI_Leaflets",
+    "Healthy_Leaves",
+    "WCLWD_DryingofLeaflets",
+    "WCLWD_Flaccidity",
+    "WCLWD_Yellowing"
+  ],
+  "image_size": [
+    224,
+    224
+  ],
+  "input_scale": "model_includes_mobilenetv2_rescaling_-1_to_1",
+  "temperature": 1.0,
+  "dataset_counts": {
+    "CCI_Caterpillars": 990,
+    "CCI_Leaflets": 795,
+    "Healthy_Leaves": 123,
+    "WCLWD_DryingofLeaflets": 1078,
+    "WCLWD_Flaccidity": 1471,
+    "WCLWD_Yellowing": 1084
+  },
+  "evaluation": {}
+}

@@ -18,6 +18,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 PROJECT_DIR = BASE_DIR.parent
 AI_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
+CLASS_NAMES_DIR = TRAINING_DIR / "class_names"
 MODEL_DIRS = [
     Path(path).expanduser()
     for path in os.getenv("MODEL_DIRS", "").split(os.pathsep)
@@ -29,21 +30,7 @@ MODEL_DIRS = [
     PROJECT_DIR,
 ]
 IMG_SIZE = 224
-
-DEFAULT_CLASSES = {
-    "tomato": ["early_blight", "healthy", "late_blight"],
-    "mango": [
-        "Bacterial Canker",
-        "Cutting Weevil",
-        "Gall Midge",
-        "Powdery Mildew",
-        "Sooty Mould",
-        "anthracnose",
-        "die back",
-        "healthy",
-    ],
-    "coconut": ["bud_rot", "healthy", "leaf_rot"],
-}
+SUPPORTED_CROPS = ("tomato", "mango", "coconut")
 
 loaded_models = {}
 MIN_MODEL_BYTES = 1024
@@ -128,7 +115,7 @@ def download_model_if_configured(crop: str) -> Path | None:
 def ensure_configured_models() -> dict[str, str]:
     results = {}
 
-    for crop in DEFAULT_CLASSES:
+    for crop in SUPPORTED_CROPS:
         try:
             if not any(path.exists() for path in candidate_model_paths(crop)) and configured_model_url(crop):
                 download_model_if_configured(crop)
@@ -160,7 +147,7 @@ def ensure_configured_models() -> dict[str, str]:
 def model_status() -> dict:
     status = {}
 
-    for crop in DEFAULT_CLASSES:
+    for crop in SUPPORTED_CROPS:
         candidates = candidate_model_paths(crop)
         available_path = next((path for path in candidates if path.exists()), None)
         size_bytes = available_path.stat().st_size if available_path else None
@@ -171,11 +158,19 @@ def model_status() -> dict:
                 "model_file_is_too_small_to_be_a_valid_trained_model"
             )
 
+        class_metadata = []
+        try:
+            class_metadata = load_class_names(crop)
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            warnings.append(f"class_metadata_unavailable:{exc}")
+
         status[crop] = {
             "available": available_path is not None and not warnings,
             "loaded": crop in loaded_models,
             "path": str(available_path) if available_path else None,
             "size_bytes": size_bytes,
+            "class_names_path": str(class_names_path(crop)),
+            "metadata_class_count": len(class_metadata),
             "warnings": warnings,
             "candidates": [str(path) for path in candidates],
         }
@@ -187,6 +182,27 @@ def metadata_path_for_model(model_path: Path) -> Path:
     return model_path.with_suffix(".json")
 
 
+def class_names_path(crop: str) -> Path:
+    return CLASS_NAMES_DIR / f"{crop}_classes.json"
+
+
+def load_class_names(crop: str) -> list[str]:
+    path = class_names_path(crop)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Class metadata missing for crop '{crop}'. Expected {path}. "
+            f"Retrain with train_model.py --crop {crop} or generate class metadata from the dataset."
+        )
+
+    with path.open("r", encoding="utf-8") as file:
+        class_names = json.load(file)
+
+    if not isinstance(class_names, list) or not all(isinstance(item, str) and item.strip() for item in class_names):
+        raise ValueError(f"Invalid class metadata in {path}. Expected a JSON array of class names.")
+
+    return class_names
+
+
 def load_metadata(crop: str, model_path: Path) -> dict:
     metadata_path = metadata_path_for_model(model_path)
     if metadata_path.exists():
@@ -195,10 +211,9 @@ def load_metadata(crop: str, model_path: Path) -> dict:
             logger.info("Loaded model metadata crop=%s path=%s metadata_path=%s", crop, model_path, metadata_path)
             return metadata
 
-    logger.warning("Model metadata missing crop=%s model_path=%s using defaults", crop, model_path)
+    logger.warning("Model metadata missing crop=%s model_path=%s using runtime defaults", crop, model_path)
     return {
         "crop": crop,
-        "class_names": DEFAULT_CLASSES.get(crop, []),
         "image_size": [IMG_SIZE, IMG_SIZE],
         "temperature": 1.0,
         "input_scale": "model_includes_preprocessing",
@@ -206,7 +221,7 @@ def load_metadata(crop: str, model_path: Path) -> dict:
 
 
 def load_crop_model(crop: str):
-    if crop not in DEFAULT_CLASSES:
+    if crop not in SUPPORTED_CROPS:
         return None, None, {"error": "Invalid crop type"}
 
     model_path = model_path_for_crop(crop)
@@ -227,10 +242,28 @@ def load_crop_model(crop: str):
         }
 
     modified_at = model_path.stat().st_mtime
+    class_metadata_path = class_names_path(crop)
+    class_metadata_modified_at = class_metadata_path.stat().st_mtime if class_metadata_path.exists() else None
     cache_entry = loaded_models.get(crop)
 
-    if cache_entry is None or cache_entry["path"] != model_path or cache_entry["modified_at"] != modified_at:
+    if (
+        cache_entry is None
+        or cache_entry["path"] != model_path
+        or cache_entry["modified_at"] != modified_at
+        or cache_entry.get("class_metadata_modified_at") != class_metadata_modified_at
+    ):
         metadata = load_metadata(crop, model_path)
+        try:
+            class_names = load_class_names(crop)
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+            logger.exception("Class metadata load failed crop=%s", crop)
+            return None, None, {
+                "error": "Class metadata could not be loaded",
+                "crop": crop,
+                "message": str(exc),
+                "class_names_path": str(class_names_path(crop)),
+            }
+
         try:
             logger.info("Loading TensorFlow model crop=%s path=%s size_bytes=%s", crop, model_path, model_path.stat().st_size)
             model = get_tensorflow().keras.models.load_model(model_path, compile=False)
@@ -246,9 +279,23 @@ def load_crop_model(crop: str):
                 ),
             }
 
+        output_size = int(model.output_shape[-1])
+        if len(class_names) != output_size:
+            return None, None, {
+                "error": "Model output size does not match class metadata",
+                "crop": crop,
+                "class_count": len(class_names),
+                "output_size": output_size,
+                "model_output_shape": str(getattr(model, "output_shape", None)),
+                "class_names_path": str(class_names_path(crop)),
+                "model_path": str(model_path),
+            }
+
+        metadata["class_names"] = class_names
         loaded_models[crop] = {
             "path": model_path,
             "modified_at": modified_at,
+            "class_metadata_modified_at": class_metadata_modified_at,
             "model": model,
             "metadata": metadata,
         }
@@ -313,23 +360,16 @@ def normalize_scores(raw_scores: np.ndarray, temperature: float) -> np.ndarray:
 
 def class_names_for_scores(crop: str, metadata: dict, scores: np.ndarray, model) -> list[str]:
     metadata_classes = metadata.get("class_names") or []
-    default_classes = DEFAULT_CLASSES.get(crop, [])
     output_size = len(scores)
 
     if len(metadata_classes) == output_size:
         return metadata_classes
 
-    if len(default_classes) == output_size:
-        logger.warning(
-            "Metadata class count mismatch crop=%s metadata_count=%s output_size=%s model_output_shape=%s. Using built-in class mapping.",
-            crop,
-            len(metadata_classes),
-            output_size,
-            getattr(model, "output_shape", None),
-        )
-        return default_classes
-
-    return metadata_classes or default_classes
+    raise ValueError(
+        "Model output size does not match class metadata: "
+        f"crop={crop}, class_count={len(metadata_classes)}, output_size={output_size}, "
+        f"model_output_shape={getattr(model, 'output_shape', None)}"
+    )
 
 
 def confidence_notes(scores: np.ndarray) -> list[str]:
@@ -360,22 +400,24 @@ def predict_image(image_path, model_type):
             "Running prediction crop=%s image_size=%s class_count=%s model_output_shape=%s",
             model_type,
             image_size,
-            len(metadata.get("class_names") or DEFAULT_CLASSES[model_type]),
+            len(metadata.get("class_names") or []),
             getattr(model, "output_shape", None),
         )
         raw_prediction = model.predict(batch, verbose=0)[0]
         scores = normalize_scores(raw_prediction, float(metadata.get("temperature", 1.0)))
-        class_names = class_names_for_scores(model_type, metadata, scores, model)
-
-        if len(class_names) != len(scores):
+        try:
+            class_names = class_names_for_scores(model_type, metadata, scores, model)
+        except ValueError as exc:
             error = {
                 "error": "Model output size does not match class metadata",
-                "classes": class_names,
-                "class_count": int(len(class_names)),
+                "crop": model_type,
+                "class_count": int(len(metadata.get("class_names") or [])),
                 "output_size": int(len(scores)),
                 "model_output_shape": str(getattr(model, "output_shape", None)),
+                "class_names_path": str(class_names_path(model_type)),
+                "message": str(exc),
             }
-            logger.error("Class lookup failed crop=%s error=%s", model_type, error)
+            logger.error("Class validation failed crop=%s error=%s", model_type, error)
             return error
 
         predicted_index = int(np.argmax(scores))

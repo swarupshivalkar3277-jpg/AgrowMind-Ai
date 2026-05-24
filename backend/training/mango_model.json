@@ -1,0 +1,69 @@
+{
+  "crop": "mango",
+  "model_file": "mango_model.keras",
+  "class_names": [
+    "Bacterial Canker",
+    "Cutting Weevil",
+    "Gall Midge",
+    "Powdery Mildew",
+    "Sooty Mould",
+    "anthracnose",
+    "die back",
+    "healthy"
+  ],
+  "image_size": [
+    224,
+    224
+  ],
+  "input_scale": "model_includes_mobilenetv2_rescaling_-1_to_1",
+  "temperature": 1.0,
+  "dataset_counts": {
+    "Bacterial Canker": 2894,
+    "Cutting Weevil": 1890,
+    "Gall Midge": 2552,
+    "Powdery Mildew": 982,
+    "Sooty Mould": 1590,
+    "anthracnose": 2075,
+    "die back": 1600,
+    "healthy": 1500
+  },
+  "evaluation": {
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        6
+      ]
+    ],
+    "per_class": {
+      "anthracnose": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "healthy": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0
+      },
+      "powdery_mildew": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 6
+      }
+    }
+  }
+}

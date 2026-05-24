@@ -16,6 +16,7 @@ BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
 DATASETS_DIR = PROJECT_DIR / "datasets"
 TRAINING_DIR = BASE_DIR / "training"
+CLASS_NAMES_DIR = TRAINING_DIR / "class_names"
 
 IMG_SIZE = 224
 BATCH_SIZE = 32
@@ -23,6 +24,11 @@ SEED = 123
 INITIAL_EPOCHS = 20
 FINE_TUNE_EPOCHS = 10
 SUPPORTED_CROPS = ("tomato", "mango", "coconut")
+EXPECTED_CLASS_COUNTS = {
+    "tomato": 10,
+    "mango": 8,
+    "coconut": 6,
+}
 
 
 def set_reproducibility(seed: int) -> None:
@@ -204,6 +210,16 @@ def save_metadata(
     counts: dict[str, int],
     evaluation: dict,
 ) -> None:
+    expected_count = EXPECTED_CLASS_COUNTS.get(crop)
+    if expected_count is not None and len(class_names) != expected_count:
+        raise ValueError(
+            f"{crop} dataset produced {len(class_names)} classes, expected {expected_count}: {class_names}"
+        )
+
+    CLASS_NAMES_DIR.mkdir(parents=True, exist_ok=True)
+    with (CLASS_NAMES_DIR / f"{crop}_classes.json").open("w", encoding="utf-8") as file:
+        json.dump(class_names, file, indent=2)
+
     metadata = {
         "crop": crop,
         "model_file": model_path.name,
@@ -272,6 +288,7 @@ def train(args) -> None:
 
     print(f"Saved model: {model_path}")
     print(f"Saved metadata: {model_path.with_suffix('.json')}")
+    print(f"Saved class names: {CLASS_NAMES_DIR / f'{args.crop}_classes.json'}")
     print(f"Saved confusion matrix: {TRAINING_DIR / 'confusion_matrix.csv'}")
 
 

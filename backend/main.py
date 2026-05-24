@@ -418,6 +418,7 @@ async def predict_crop(
         result = enrich_prediction(crop, result)
         market_products = await recommended_products(crop, result.get("disease", ""), limit=6)
         result["marketplace_products"] = market_products
+        result.setdefault("recommendation", {})["marketplace_products"] = market_products
 
         await db.prediction_history.insert_one({
             "user_id": str(user["_id"]),
@@ -430,14 +431,11 @@ async def predict_crop(
         return {
             "success": True,
             "crop": crop,
-            "prediction": result,
+            "disease": result.get("disease"),
+            "confidence": result.get("confidence"),
             "severity": result.get("severity"),
-            "fertilizer": result.get("fertilizer", []),
-            "treatment": result.get("treatment", []),
-            "irrigation": result.get("irrigation", ""),
-            "prevention": result.get("prevention", []),
-            "organic_solution": result.get("organic_solution", []),
-            "harvest_risk": result.get("harvest_risk"),
+            "recommendation": result.get("recommendation", {}),
+            "prediction": result,
             "marketplace_products": market_products,
             "user": user["email"]
         }

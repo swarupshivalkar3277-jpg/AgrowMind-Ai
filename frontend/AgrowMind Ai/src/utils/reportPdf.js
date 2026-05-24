@@ -73,6 +73,13 @@ function buildPdf(lines) {
 
 export function downloadPredictionReport({ user, crop, prediction, createdAt = new Date() }) {
   const disease = prediction?.disease?.replaceAll("_", " ") || "Unknown";
+  const recommendation = prediction?.recommendation || {};
+  const symptoms = recommendation.symptoms || prediction?.symptoms || [];
+  const causes = recommendation.causes || prediction?.causes || [];
+  const treatment = recommendation.treatment || prediction?.treatment || [];
+  const prevention = recommendation.prevention || prediction?.prevention || [];
+  const organic = recommendation.organic_solutions || prediction?.organic_solutions || prediction?.organic_solution || [];
+  const chemical = recommendation.chemical_solutions || prediction?.chemical_solutions || [];
   const lines = [
     "AgroMind AI Smart Farming Report",
     `User: ${user?.name || user?.email || "Farmer"}`,
@@ -83,17 +90,32 @@ export function downloadPredictionReport({ user, crop, prediction, createdAt = n
     `Severity: ${prediction?.severity || "N/A"}`,
     `Harvest risk: ${prediction?.harvest_risk || "N/A"}`,
     "",
+    "Symptoms:",
+    ...symptoms.flatMap((item) => wrapLine(`- ${item}`)),
+    "",
+    "Causes:",
+    ...causes.flatMap((item) => wrapLine(`- ${item}`)),
+    "",
     "Fertilizer recommendation:",
     ...(prediction?.fertilizer || []).flatMap((item) => wrapLine(`- ${item}`)),
     "",
     "Treatment recommendation:",
-    ...(prediction?.treatment || []).flatMap((item) => wrapLine(`- ${item}`)),
+    ...treatment.flatMap((item) => wrapLine(`- ${item}`)),
+    "",
+    "Organic solutions:",
+    ...organic.flatMap((item) => wrapLine(`- ${item}`)),
+    "",
+    "Chemical solutions:",
+    ...chemical.flatMap((item) => wrapLine(`- ${item}`)),
+    "",
+    "Prevention:",
+    ...prevention.flatMap((item) => wrapLine(`- ${item}`)),
     "",
     "Irrigation advice:",
     ...wrapLine(prediction?.irrigation || "N/A"),
   ];
 
-  const pdf = buildPdf(lines.slice(0, 48));
+  const pdf = buildPdf(lines.slice(0, 64));
   const blob = new Blob([pdf], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
