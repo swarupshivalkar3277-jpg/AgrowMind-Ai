@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 
@@ -6,44 +6,53 @@ import AppShell from "./components/AppShell";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { CartProvider } from "./context/CartContext";
-import AdminDashboard from "./pages/AdminDashboard";
-import AdminAnalytics from "./pages/admin/AdminAnalytics";
-import AdminOrders from "./pages/admin/AdminOrders";
-import AdminPredictions from "./pages/admin/AdminPredictions";
-import AdminProductForm from "./pages/admin/AdminProductForm";
-import AdminProducts from "./pages/admin/AdminProducts";
-import AdminReports from "./pages/admin/AdminReports";
-import AdminSettings from "./pages/admin/AdminSettings";
-import AdminUsers from "./pages/admin/AdminUsers";
-import AnalyticsPage from "./pages/AnalyticsPage";
-import AssistantPage from "./pages/AssistantPage";
-import Cart from "./pages/Cart";
-import Checkout from "./pages/Checkout";
-import Dashboard from "./pages/Dashboard";
-import DiagnosePage from "./pages/DiagnosePage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import Home from "./pages/Home";
-import HistoryPage from "./pages/HistoryPage";
 import Login from "./pages/Login";
-import Marketplace from "./pages/Marketplace";
-import NotificationsPage from "./pages/NotificationsPage";
-import Orders from "./pages/Orders";
-import PaymentStatus from "./pages/PaymentStatus";
-import ProductDetails from "./pages/ProductDetails";
 import Register from "./pages/Register";
-import SettingsPage from "./pages/SettingsPage";
-import ReportsPage from "./pages/ReportsPage";
-import WeatherPage from "./pages/WeatherPage";
-import WishlistPage from "./pages/WishlistPage";
+
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
+const AdminAnalytics = lazy(() => import("./pages/admin/AdminAnalytics"));
+const AdminOrders = lazy(() => import("./pages/admin/AdminOrders"));
+const AdminPredictions = lazy(() => import("./pages/admin/AdminPredictions"));
+const AdminProductForm = lazy(() => import("./pages/admin/AdminProductForm"));
+const AdminProducts = lazy(() => import("./pages/admin/AdminProducts"));
+const AdminReports = lazy(() => import("./pages/admin/AdminReports"));
+const AdminSettings = lazy(() => import("./pages/admin/AdminSettings"));
+const AdminUsers = lazy(() => import("./pages/admin/AdminUsers"));
+const AnalyticsPage = lazy(() => import("./pages/AnalyticsPage"));
+const AssistantPage = lazy(() => import("./pages/AssistantPage"));
+const Cart = lazy(() => import("./pages/Cart"));
+const Checkout = lazy(() => import("./pages/Checkout"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const DiagnosePage = lazy(() => import("./pages/DiagnosePage"));
+const HistoryPage = lazy(() => import("./pages/HistoryPage"));
+const Marketplace = lazy(() => import("./pages/Marketplace"));
+const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
+const Orders = lazy(() => import("./pages/Orders"));
+const PaymentStatus = lazy(() => import("./pages/PaymentStatus"));
+const ProductDetails = lazy(() => import("./pages/ProductDetails"));
+const ReportsPage = lazy(() => import("./pages/ReportsPage"));
+const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const WeatherPage = lazy(() => import("./pages/WeatherPage"));
+const WishlistPage = lazy(() => import("./pages/WishlistPage"));
 
 function LoadingScreen({ label = "Loading secure workspace..." }) {
   return (
-    <main className="stateScreen">
-      <span className="spinner" />
+    <main className="stateScreen premiumLoader">
+      <div className="skeletonStack" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </div>
       <h1>AgroMind AI</h1>
       <p>{label}</p>
     </main>
   );
+}
+
+function LazyPage({ children }) {
+  return <Suspense fallback={<LoadingScreen label="Preparing your workspace..." />}>{children}</Suspense>;
 }
 
 function ProtectedRoute({ children, adminOnly = false }) {
@@ -94,38 +103,38 @@ function AppRoutes() {
     <>
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/marketplace" element={<Marketplace />} />
-        <Route path="/marketplace/product/:id" element={<ProductDetails />} />
+        <Route path="/marketplace" element={<LazyPage><Marketplace /></LazyPage>} />
+        <Route path="/marketplace/product/:id" element={<LazyPage><ProductDetails /></LazyPage>} />
         <Route path="/login" element={<PublicOnly><main className="authPage"><LoginRoute /></main></PublicOnly>} />
         <Route path="/register" element={<PublicOnly><main className="authPage"><RegisterRoute /></main></PublicOnly>} />
         <Route path="/forgot-password" element={<PublicOnly><main className="authPage"><ForgotPasswordPage /></main></PublicOnly>} />
         <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/diagnose" element={<DiagnosePage />} />
-          <Route path="/cart" element={<Cart />} />
-          <Route path="/checkout" element={<Checkout />} />
-          <Route path="/orders" element={<Orders />} />
-          <Route path="/wishlist" element={<WishlistPage />} />
-          <Route path="/history" element={<HistoryPage />} />
-          <Route path="/analytics" element={<AnalyticsPage />} />
-          <Route path="/weather" element={<WeatherPage />} />
-          <Route path="/assistant" element={<AssistantPage />} />
-          <Route path="/reports" element={<ReportsPage />} />
-          <Route path="/settings" element={<SettingsPage darkMode={darkMode} onToggleTheme={() => setDarkMode((value) => !value)} />} />
-          <Route path="/notifications" element={<NotificationsPage />} />
-          <Route path="/payment/success" element={<PaymentStatus success />} />
-          <Route path="/payment/failed" element={<PaymentStatus success={false} />} />
+          <Route path="/dashboard" element={<LazyPage><Dashboard /></LazyPage>} />
+          <Route path="/diagnose" element={<LazyPage><DiagnosePage /></LazyPage>} />
+          <Route path="/cart" element={<LazyPage><Cart /></LazyPage>} />
+          <Route path="/checkout" element={<LazyPage><Checkout /></LazyPage>} />
+          <Route path="/orders" element={<LazyPage><Orders /></LazyPage>} />
+          <Route path="/wishlist" element={<LazyPage><WishlistPage /></LazyPage>} />
+          <Route path="/history" element={<LazyPage><HistoryPage /></LazyPage>} />
+          <Route path="/analytics" element={<LazyPage><AnalyticsPage /></LazyPage>} />
+          <Route path="/weather" element={<LazyPage><WeatherPage /></LazyPage>} />
+          <Route path="/assistant" element={<LazyPage><AssistantPage /></LazyPage>} />
+          <Route path="/reports" element={<LazyPage><ReportsPage /></LazyPage>} />
+          <Route path="/settings" element={<LazyPage><SettingsPage darkMode={darkMode} onToggleTheme={() => setDarkMode((value) => !value)} /></LazyPage>} />
+          <Route path="/notifications" element={<LazyPage><NotificationsPage /></LazyPage>} />
+          <Route path="/payment/success" element={<LazyPage><PaymentStatus success /></LazyPage>} />
+          <Route path="/payment/failed" element={<LazyPage><PaymentStatus success={false} /></LazyPage>} />
           <Route path="/admin" element={<Navigate replace to="/admin/dashboard" />} />
-          <Route path="/admin/dashboard" element={<ProtectedRoute adminOnly><AdminDashboard /></ProtectedRoute>} />
-          <Route path="/admin/users" element={<ProtectedRoute adminOnly><AdminUsers /></ProtectedRoute>} />
-          <Route path="/admin/products" element={<ProtectedRoute adminOnly><AdminProducts /></ProtectedRoute>} />
-          <Route path="/admin/products/add" element={<ProtectedRoute adminOnly><AdminProductForm /></ProtectedRoute>} />
-          <Route path="/admin/products/edit/:id" element={<ProtectedRoute adminOnly><AdminProductForm /></ProtectedRoute>} />
-          <Route path="/admin/orders" element={<ProtectedRoute adminOnly><AdminOrders /></ProtectedRoute>} />
-          <Route path="/admin/predictions" element={<ProtectedRoute adminOnly><AdminPredictions /></ProtectedRoute>} />
-          <Route path="/admin/analytics" element={<ProtectedRoute adminOnly><AdminAnalytics /></ProtectedRoute>} />
-          <Route path="/admin/reports" element={<ProtectedRoute adminOnly><AdminReports /></ProtectedRoute>} />
-          <Route path="/admin/settings" element={<ProtectedRoute adminOnly><AdminSettings /></ProtectedRoute>} />
+          <Route path="/admin/dashboard" element={<ProtectedRoute adminOnly><LazyPage><AdminDashboard /></LazyPage></ProtectedRoute>} />
+          <Route path="/admin/users" element={<ProtectedRoute adminOnly><LazyPage><AdminUsers /></LazyPage></ProtectedRoute>} />
+          <Route path="/admin/products" element={<ProtectedRoute adminOnly><LazyPage><AdminProducts /></LazyPage></ProtectedRoute>} />
+          <Route path="/admin/products/add" element={<ProtectedRoute adminOnly><LazyPage><AdminProductForm /></LazyPage></ProtectedRoute>} />
+          <Route path="/admin/products/edit/:id" element={<ProtectedRoute adminOnly><LazyPage><AdminProductForm /></LazyPage></ProtectedRoute>} />
+          <Route path="/admin/orders" element={<ProtectedRoute adminOnly><LazyPage><AdminOrders /></LazyPage></ProtectedRoute>} />
+          <Route path="/admin/predictions" element={<ProtectedRoute adminOnly><LazyPage><AdminPredictions /></LazyPage></ProtectedRoute>} />
+          <Route path="/admin/analytics" element={<ProtectedRoute adminOnly><LazyPage><AdminAnalytics /></LazyPage></ProtectedRoute>} />
+          <Route path="/admin/reports" element={<ProtectedRoute adminOnly><LazyPage><AdminReports /></LazyPage></ProtectedRoute>} />
+          <Route path="/admin/settings" element={<ProtectedRoute adminOnly><LazyPage><AdminSettings /></LazyPage></ProtectedRoute>} />
         </Route>
       </Routes>
       <Toaster position="top-right" toastOptions={{ className: "toast" }} />

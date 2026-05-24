@@ -13,6 +13,36 @@ const api = axios.create({
   withCredentials: false,
 });
 
+const GET_CACHE_TTL_MS = 60_000;
+const getCache = new Map();
+
+function cacheKey(url, params = {}) {
+  const query = new URLSearchParams(
+    Object.entries(params)
+      .filter(([, value]) => value !== undefined && value !== null && value !== "")
+      .sort(([left], [right]) => left.localeCompare(right))
+  ).toString();
+  return query ? `${url}?${query}` : url;
+}
+
+function clearGetCache() {
+  getCache.clear();
+}
+
+function cachedGet(url, config = {}) {
+  const key = cacheKey(url, config.params);
+  const cached = getCache.get(key);
+
+  if (cached && Date.now() - cached.createdAt < GET_CACHE_TTL_MS) {
+    return Promise.resolve(cached.response);
+  }
+
+  return api.get(url, config).then((response) => {
+    getCache.set(key, { createdAt: Date.now(), response });
+    return response;
+  });
+}
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
 
@@ -24,7 +54,12 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (response.config?.method && response.config.method !== "get") {
+      clearGetCache();
+    }
+    return response;
+  },
   (error) => {
     if (error?.response?.status === 401) {
       localStorage.removeItem("token");
@@ -76,19 +111,19 @@ export function logoutUser() {
 }
 
 export function getProfile() {
-  return api.get("/profile");
+  return cachedGet("/profile");
 }
 
 export function getHistory() {
-  return api.get("/history");
+  return cachedGet("/history");
 }
 
 export function getProducts(params = {}) {
-  return api.get("/marketplace/products", { params });
+  return cachedGet("/marketplace/products", { params });
 }
 
 export function getProduct(productId) {
-  return api.get(`/marketplace/products/${productId}`);
+  return cachedGet(`/marketplace/products/${productId}`);
 }
 
 export function createProduct(payload) {
@@ -104,11 +139,11 @@ export function deleteProduct(productId) {
 }
 
 export function getSellerProducts() {
-  return api.get("/marketplace/products");
+  return cachedGet("/marketplace/products");
 }
 
 export function getCart() {
-  return api.get("/marketplace/cart");
+  return cachedGet("/marketplace/cart");
 }
 
 export function addCartItem(productId, quantity = 1) {
@@ -128,7 +163,7 @@ export function toggleWishlist(productId) {
 }
 
 export function getWishlist() {
-  return api.get("/marketplace/wishlist");
+  return cachedGet("/marketplace/wishlist");
 }
 
 export function checkoutCart(payload) {
@@ -144,7 +179,7 @@ export function verifyRazorpayPayment(payload) {
 }
 
 export function getOrders() {
-  return api.get("/marketplace/orders");
+  return cachedGet("/marketplace/orders");
 }
 
 export function cancelOrder(orderId) {
@@ -152,7 +187,7 @@ export function cancelOrder(orderId) {
 }
 
 export function getAdminOrders() {
-  return api.get("/admin/orders");
+  return cachedGet("/admin/orders");
 }
 
 export function updateAdminOrderStatus(orderId, statusValue) {
@@ -162,11 +197,11 @@ export function updateAdminOrderStatus(orderId, statusValue) {
 }
 
 export function getAdminAnalytics() {
-  return api.get("/admin/analytics");
+  return cachedGet("/admin/analytics");
 }
 
 export function getAdminUsers(params = {}) {
-  return api.get("/admin/users", { params });
+  return cachedGet("/admin/users", { params });
 }
 
 export function deleteAdminUser(userId) {

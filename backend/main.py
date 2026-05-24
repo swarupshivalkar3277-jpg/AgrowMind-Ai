@@ -66,7 +66,10 @@ REQUIRED_ENV_VARS = [
 
 
 def missing_required_env_vars() -> list[str]:
-    return [name for name in REQUIRED_ENV_VARS if not os.getenv(name)]
+    missing = [name for name in REQUIRED_ENV_VARS if not os.getenv(name)]
+    if "ADMIN_REGISTER_SECRET" in missing and os.getenv("ADMIN_SECRET"):
+        missing.remove("ADMIN_REGISTER_SECRET")
+    return missing
 
 # =========================
 # APP

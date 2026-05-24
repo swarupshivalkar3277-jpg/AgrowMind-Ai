@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import os
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -19,6 +20,7 @@ from database.mongodb import db, drop_parallel_array_product_indexes
 from utils.rate_limit import rate_limit
 
 router = APIRouter(prefix="/marketplace", tags=["Marketplace"])
+logger = logging.getLogger("agromind.marketplace")
 
 TAX_RATE = 0.05
 FREE_SHIPPING_THRESHOLD = 999
@@ -404,20 +406,37 @@ async def create_razorpay_order(payload: RazorpayOrderRequest, user=Depends(get_
     key_id, key_secret = razorpay_credentials()
     receipt = payload.receipt or f"agromind-{uuid4().hex[:16]}"
     amount_paise = int(round(cart["total"] * 100))
-    async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.post(
-            "https://api.razorpay.com/v1/orders",
-            auth=(key_id, key_secret),
-            json={
-                "amount": amount_paise,
-                "currency": "INR",
-                "receipt": receipt,
-                "notes": {"user_id": str(user["_id"]), "email": user["email"]},
-            },
-        )
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(
+                "https://api.razorpay.com/v1/orders",
+                auth=(key_id, key_secret),
+                json={
+                    "amount": amount_paise,
+                    "currency": "INR",
+                    "receipt": receipt,
+                    "notes": {"user_id": str(user["_id"]), "email": user["email"]},
+                },
+            )
+    except httpx.RequestError as exc:
+        logger.exception("Razorpay order request failed user=%s amount_paise=%s", user.get("email"), amount_paise)
+        raise HTTPException(status_code=502, detail="Razorpay is unreachable from the backend. Check Render network and Razorpay configuration.") from exc
 
     if response.status_code >= 400:
-        raise HTTPException(status_code=502, detail=f"Razorpay order creation failed: {response.text}")
+        logger.error(
+            "Razorpay order creation failed status=%s user=%s amount_paise=%s body=%s",
+            response.status_code,
+            user.get("email"),
+            amount_paise,
+            response.text[:1000],
+        )
+        message = "Razorpay order creation failed"
+        try:
+            error_body = response.json()
+            message = error_body.get("error", {}).get("description") or message
+        except ValueError:
+            pass
+        raise HTTPException(status_code=502, detail=message)
 
     order = response.json()
     await db.payments.insert_one({

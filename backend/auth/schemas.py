@@ -1,4 +1,4 @@
-from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class UserRegister(BaseModel):
@@ -7,7 +7,14 @@ class UserRegister(BaseModel):
     password: str = Field(..., min_length=6, max_length=128)
     role: str = Field(default="farmer", pattern="^(farmer|admin)$")
     otp_code: str | None = Field(default=None, min_length=4, max_length=8)
-    admin_secret: str | None = Field(default=None, min_length=1, max_length=256)
+    admin_secret: str | None = Field(default=None, max_length=256)
+
+    @field_validator("admin_secret", mode="before")
+    @classmethod
+    def blank_admin_secret_is_missing(cls, value):
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class UserLogin(BaseModel):

@@ -73,7 +73,19 @@ export default function Register({ onHome, onSwitch }) {
     setSubmitting(true);
 
     try {
-      await register(form);
+      const payload = {
+        name: form.name.trim(),
+        email: form.email.trim(),
+        password: form.password,
+        role: form.role,
+        otp_code: form.otp_code.trim(),
+      };
+
+      if (form.role === "admin") {
+        payload.admin_secret = form.admin_secret;
+      }
+
+      await register(payload);
       toast.success("Registration successful. Please login.");
       onSwitch();
     } catch (err) {
@@ -144,7 +156,17 @@ export default function Register({ onHome, onSwitch }) {
         {otpMessage && <div className="successAlert">{otpMessage}</div>}
         <label>
           <span>Role</span>
-          <select onChange={(event) => updateField("role", event.target.value)} value={form.role}>
+          <select
+            onChange={(event) => {
+              const role = event.target.value;
+              setForm((current) => ({
+                ...current,
+                role,
+                admin_secret: role === "admin" ? current.admin_secret : "",
+              }));
+            }}
+            value={form.role}
+          >
             <option value="farmer">Farmer</option>
             <option value="admin">Admin</option>
           </select>

@@ -19,6 +19,15 @@ function loadRazorpayScript() {
   });
 }
 
+function checkoutErrorMessage(error) {
+  const payload = error?.response?.data;
+  const detail = payload?.detail || payload?.error;
+
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map((item) => item.msg).filter(Boolean).join(", ");
+  return error?.message || "Checkout failed";
+}
+
 export default function Checkout() {
   const { cart, refreshCart } = useCart();
   const navigate = useNavigate();
@@ -86,7 +95,7 @@ export default function Checkout() {
       toast.success("Order placed");
       navigate(`/payment/success?order=${data.order.id}`);
     } catch (err) {
-      setError(err?.response?.data?.detail || err?.message || "Checkout failed");
+      setError(checkoutErrorMessage(err));
       if (form.payment_method === "razorpay") navigate("/payment/failed");
     } finally {
       setLoading(false);

@@ -51,16 +51,22 @@ def validate_registration_role(user: UserRegister) -> str:
     if role != "admin":
         return "farmer"
 
-    expected_secret = os.getenv("ADMIN_REGISTER_SECRET")
+    if not user.admin_secret:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Admin secret required",
+        )
+
+    expected_secret = os.getenv("ADMIN_REGISTER_SECRET") or os.getenv("ADMIN_SECRET")
     if not expected_secret:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="ADMIN_REGISTER_SECRET is not configured on the backend.",
+            detail="Admin registration secret is not configured on the backend.",
         )
     if user.admin_secret != expected_secret:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid admin registration secret",
+            detail="Invalid admin secret",
         )
     return "admin"
 
