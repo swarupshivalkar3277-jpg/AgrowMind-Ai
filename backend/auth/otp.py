@@ -190,6 +190,13 @@ async def create_and_send_otp(email: str, purpose: str) -> None:
         "expires_at": now + timedelta(minutes=OTP_EXPIRY_MINUTES),
         "created_at": now,
     })
+    logger.info(
+        "OTP record created email=%s purpose=%s otp_id=%s delivery_status=pending expires_at=%s",
+        email.lower(),
+        purpose,
+        result.inserted_id,
+        now + timedelta(minutes=OTP_EXPIRY_MINUTES),
+    )
     try:
         await send_email_otp(email.lower(), code, purpose)
     except HTTPException as exc:
@@ -212,16 +219,41 @@ async def create_and_send_otp(email: str, purpose: str) -> None:
                     }
                 },
             )
+            logger.warning(
+                "OTP delivery marked sent through dev fallback email=%s purpose=%s otp_id=%s",
+                email.lower(),
+                purpose,
+                result.inserted_id,
+            )
             return
         await db.email_otps.delete_one({"_id": result.inserted_id})
+        logger.warning(
+            "OTP record deleted after provider failure email=%s purpose=%s otp_id=%s detail=%s",
+            email.lower(),
+            purpose,
+            result.inserted_id,
+            exc.detail,
+        )
         raise
     except Exception:
         await db.email_otps.delete_one({"_id": result.inserted_id})
+        logger.exception(
+            "OTP record deleted after unexpected failure email=%s purpose=%s otp_id=%s",
+            email.lower(),
+            purpose,
+            result.inserted_id,
+        )
         raise
 
     await db.email_otps.update_one(
         {"_id": result.inserted_id},
         {"$set": {"delivery_status": "sent", "delivery_channel": "resend", "sent_at": datetime.now(timezone.utc)}},
+    )
+    logger.info(
+        "OTP delivery marked sent email=%s purpose=%s otp_id=%s delivery_channel=resend",
+        email.lower(),
+        purpose,
+        result.inserted_id,
     )
 
 

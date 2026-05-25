@@ -59,10 +59,10 @@ export default function Register({ onHome, onSwitch }) {
       await sendOtp({ email: form.email, purpose: "register" });
       setOtpMessage("OTP sent to your email.");
       toast.success("OTP sent to your email");
+      setOtpCooldown(60);
     } catch (err) {
       setError(normalizeError(err));
     } finally {
-      setOtpCooldown(60);
       setSendingOtp(false);
     }
   }

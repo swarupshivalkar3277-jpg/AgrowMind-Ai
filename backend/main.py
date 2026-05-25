@@ -132,6 +132,8 @@ def _csv_env(name: str) -> list[str]:
 ENVIRONMENT = os.getenv("ENVIRONMENT", os.getenv("ENV", "development")).lower()
 PRODUCTION_FRONTEND_ORIGINS = [
     "https://agrowmindai.vercel.app",
+    "https://agromind.in",
+    "https://www.agromind.in",
     "https://agromindai.in",
     "https://www.agromindai.in",
 ]

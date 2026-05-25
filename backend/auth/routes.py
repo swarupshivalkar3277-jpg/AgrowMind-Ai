@@ -1,7 +1,7 @@
 from urllib.parse import urlencode
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from pymongo.errors import PyMongoError
 
@@ -72,8 +72,17 @@ def validate_registration_role(user: UserRegister) -> str:
 
 
 @router.post("/send-otp", dependencies=[Depends(rate_limit(5, 300))])
-async def send_otp(payload: OtpRequest):
-    logger.info("OTP request received email=%s purpose=%s", payload.email, payload.purpose)
+async def send_otp(payload: OtpRequest, request: Request):
+    logger.info(
+        "OTP request received email=%s purpose=%s origin=%s referer=%s host=%s forwarded_host=%s client=%s",
+        payload.email,
+        payload.purpose,
+        request.headers.get("origin"),
+        request.headers.get("referer"),
+        request.headers.get("host"),
+        request.headers.get("x-forwarded-host"),
+        request.client.host if request.client else None,
+    )
     try:
         await create_and_send_otp(payload.email, payload.purpose)
     except PyMongoError as exc:

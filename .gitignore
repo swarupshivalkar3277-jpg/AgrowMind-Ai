@@ -108,3 +108,5 @@ text doc and passwords/
 # Environment files
 .env
 .env.*
+# RAG files
+rag/

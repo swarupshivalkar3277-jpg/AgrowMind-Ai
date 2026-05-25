@@ -77,10 +77,10 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
       await sendOtp({ email, purpose });
       setMessage("OTP sent to your email.");
       toast.success("OTP sent to your email");
+      setOtpCooldown(60);
     } catch (err) {
       setError(normalizeError(err));
     } finally {
-      setOtpCooldown(60);
       setSendingOtp(false);
     }
   }
