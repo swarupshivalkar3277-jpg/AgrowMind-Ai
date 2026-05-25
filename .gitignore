@@ -100,6 +100,7 @@ echo backend/training/*.keras >> .gitignore
 # AI models
 *.keras
 backend/training/*.keras
+!backend/training/coconut_model.keras
 
 # Local notes / passwords
 New Text Document (2).txt
@@ -110,3 +111,11 @@ text doc and passwords/
 .env.*
 # RAG files
 rag/
+!backend/rag/
+!backend/rag/**
+backend/rag/**/__pycache__/
+backend/rag/**/*.pyc
+backend/vector_db/*
+!backend/vector_db/.gitkeep
+backend/vector_db/
+backend/knowledge_base/**/*.pdf

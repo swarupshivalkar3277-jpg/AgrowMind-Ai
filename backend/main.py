@@ -30,6 +30,8 @@ from auth.models import user_public
 from auth.otp import email_config_status
 from routes.admin import router as admin_router
 from routes.marketplace import router as marketplace_router, recommended_products
+from rag.api.routes import router as rag_router
+from rag.services.rag_service import answer_disease_question
 
 # =========================
 # AI MODULES
@@ -202,6 +204,7 @@ async def security_headers(request: Request, call_next):
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(marketplace_router)
 app.include_router(admin_router)
+app.include_router(rag_router)
 
 
 
@@ -424,6 +427,19 @@ async def predict_crop(
         market_products = await recommended_products(crop, result.get("disease", ""), limit=6)
         result["marketplace_products"] = market_products
         result.setdefault("recommendation", {})["marketplace_products"] = market_products
+        rag_guidance = None
+        rag_error = None
+        try:
+            rag_guidance = await answer_disease_question(crop, result.get("disease", ""), user=user)
+            result["rag_guidance"] = {
+                "answer": rag_guidance["answer"],
+                "sources": rag_guidance["sources"],
+                "provider": rag_guidance.get("provider"),
+            }
+        except Exception as exc:
+            rag_error = "RAG guidance is unavailable. Build the RAG index and verify LLM configuration."
+            logger.exception("RAG guidance failed crop=%s disease=%s user=%s", crop, result.get("disease"), user.get("email"))
+            result["rag_guidance_error"] = rag_error
 
         await db.prediction_history.insert_one({
             "user_id": str(user["_id"]),
@@ -442,6 +458,8 @@ async def predict_crop(
             "recommendation": result.get("recommendation", {}),
             "prediction": result,
             "marketplace_products": market_products,
+            "rag_guidance": result.get("rag_guidance"),
+            "rag_guidance_error": rag_error,
             "user": user["email"]
         }
 

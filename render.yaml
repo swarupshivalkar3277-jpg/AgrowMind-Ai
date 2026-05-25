@@ -3,10 +3,15 @@ services:
     name: agromind-ai-api
     runtime: python
     rootDir: backend
-    plan: free
+    # Persistent disks require a paid Render web service.
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
+    disk:
+      name: rag-vector-db
+      mountPath: /opt/render/project/src/backend/vector_db
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
@@ -46,6 +51,24 @@ services:
         sync: false
       - key: GOOGLE_REDIRECT_URI
         value: https://agromind-ai-api.onrender.com/auth/google/callback
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: RAG_LLM_PROVIDER
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-1.5-flash
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: RAG_KNOWLEDGE_BASE_DIR
+        value: knowledge_base
+      - key: RAG_VECTOR_DB_PATH
+        value: vector_db
+      - key: RAG_COLLECTION_NAME
+        value: agromind_knowledge
+      - key: RAG_EMBEDDING_MODEL
+        value: all-MiniLM-L6-v2
       - key: MODEL_DIRS
         sync: false
       - key: MODEL_BASE_URL

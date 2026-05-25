@@ -269,6 +269,15 @@ async def ensure_indexes() -> None:
     await db.email_otps.create_index("expires_at", expireAfterSeconds=0)
     await db.email_otps.create_index([("email", 1), ("purpose", 1), ("created_at", -1)])
 
+    # ======================================
+    # RAG CHAT HISTORY
+    # ======================================
+    await db.rag_chats.create_index([
+        ("user_id", 1),
+        ("created_at", -1),
+    ])
+    await db.rag_chats.create_index("created_at")
+
     logger.info("All MongoDB indexes created successfully")
 
 

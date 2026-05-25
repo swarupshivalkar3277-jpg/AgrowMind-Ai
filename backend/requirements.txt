@@ -77,3 +77,7 @@ urllib3==2.7.0
 uvicorn==0.47.0
 wheel==0.47.0
 wrapt==2.1.2
+chromadb
+sentence-transformers
+pymupdf
+pypdf

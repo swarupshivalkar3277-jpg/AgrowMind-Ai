@@ -6,6 +6,7 @@ import os
 import shutil
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -86,6 +87,46 @@ def configured_model_url(crop: str) -> str | None:
     return None
 
 
+def expected_class_count(crop: str) -> int | None:
+    try:
+        return len(load_class_names(crop))
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def keras_output_size_from_config(model_path: Path) -> int | None:
+    if model_path.suffix.lower() != ".keras":
+        return None
+
+    try:
+        with zipfile.ZipFile(model_path) as archive:
+            config = json.loads(archive.read("config.json"))
+    except (KeyError, OSError, json.JSONDecodeError, zipfile.BadZipFile):
+        return None
+
+    layers_config = config.get("config", {}).get("layers", [])
+    dense_layers = [
+        layer
+        for layer in layers_config
+        if layer.get("class_name") == "Dense" and layer.get("config", {}).get("units")
+    ]
+    if not dense_layers:
+        return None
+    return int(dense_layers[-1]["config"]["units"])
+
+
+def validate_downloaded_model_artifact(crop: str, model_path: Path) -> None:
+    expected_count = expected_class_count(crop)
+    output_size = keras_output_size_from_config(model_path)
+    if expected_count is None or output_size is None:
+        return
+    if expected_count != output_size:
+        raise RuntimeError(
+            f"Downloaded {crop} model output size {output_size} does not match "
+            f"class metadata count {expected_count}. Check {crop.upper()}_MODEL_URL."
+        )
+
+
 def download_model_if_configured(crop: str) -> Path | None:
     url = configured_model_url(crop)
     if not url:
@@ -105,6 +146,7 @@ def download_model_if_configured(crop: str) -> Path | None:
             temp_path.unlink(missing_ok=True)
             raise RuntimeError(f"Downloaded {crop} model is too small to be valid")
 
+        validate_downloaded_model_artifact(crop, temp_path)
         temp_path.replace(destination)
         logger.info("Downloaded %s model to %s size_bytes=%s", crop, destination, destination.stat().st_size)
         return destination
