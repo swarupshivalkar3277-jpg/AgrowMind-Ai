@@ -9,9 +9,11 @@ export const API_BASE =
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 30000,
+  timeout: 60000,
   withCredentials: false,
 });
+
+export const PREDICTION_TIMEOUT_MS = 180000;
 
 const GET_CACHE_TTL_MS = 60_000;
 const getCache = new Map();

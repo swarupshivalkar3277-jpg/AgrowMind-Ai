@@ -135,7 +135,7 @@ def make_datasets(dataset_dir: Path, image_size: int, batch_size: int, seed: int
         seed=seed,
         image_size=(image_size, image_size),
         batch_size=batch_size,
-        shuffle=False,
+        shuffle=True,
     )
 
     return train_ds, val_ds, train_ds.class_names
@@ -143,6 +143,15 @@ def make_datasets(dataset_dir: Path, image_size: int, batch_size: int, seed: int
 
 def dataset_label_distribution(dataset, class_names: list[str]) -> dict[str, int]:
     counts = {class_name: 0 for class_name in class_names}
+    file_paths = getattr(dataset, "file_paths", None)
+    if file_paths:
+        class_name_set = set(class_names)
+        for file_path in file_paths:
+            class_name = Path(file_path).parent.name
+            if class_name in class_name_set:
+                counts[class_name] += 1
+        return counts
+
     for _, labels in dataset:
         for label in labels.numpy().astype(int).tolist():
             counts[class_names[label]] += 1

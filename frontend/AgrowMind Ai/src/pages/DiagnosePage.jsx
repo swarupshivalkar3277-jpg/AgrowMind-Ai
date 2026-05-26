@@ -6,7 +6,7 @@ import toast from "react-hot-toast";
 import PredictionResultCard from "../components/PredictionResultCard";
 import UploadBox from "../components/UploadBox";
 import { useAuth } from "../context/AuthContext";
-import api, { getHistory } from "../services/authService";
+import api, { getHistory, PREDICTION_TIMEOUT_MS } from "../services/authService";
 import { downloadPredictionReport } from "../utils/reportPdf";
 
 const crops = [
@@ -18,6 +18,8 @@ const crops = [
 function normalizeError(error) {
   const detail = error?.response?.data?.detail;
   if (typeof detail === "string") return detail;
+  if (detail?.message) return detail.message;
+  if (detail?.reason && detail?.reason !== detail?.error) return `${detail.error || "Prediction failed"}: ${detail.reason}`;
   if (detail?.error) return detail.error;
   if (Array.isArray(detail)) return detail.map((item) => item.msg).filter(Boolean).join(", ");
   return error?.message || "Prediction failed";
@@ -63,6 +65,7 @@ export default function DiagnosePage() {
     try {
       const { data } = await api.post(`/predict/${crop}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: PREDICTION_TIMEOUT_MS,
       });
       setResult({ ...data, created_at: new Date().toISOString() });
       getHistory().catch(() => null);

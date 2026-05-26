@@ -144,6 +144,38 @@ def validate_downloaded_model_artifact(crop: str, model_path: Path) -> None:
         )
 
 
+def model_artifact_error(crop: str, model_path: Path) -> dict | None:
+    size_bytes = model_path.stat().st_size
+    if size_bytes < MIN_MODEL_BYTES:
+        return {
+            "error": f"{crop} model artifact is invalid",
+            "crop": crop,
+            "path": str(model_path),
+            "size_bytes": size_bytes,
+            "message": "Model file is too small to be a valid trained model.",
+        }
+
+    expected_count = expected_class_count(crop)
+    output_size = keras_output_size_from_config(model_path)
+    if expected_count is not None and output_size is not None and expected_count != output_size:
+        return {
+            "error": "Model output size does not match class metadata",
+            "crop": crop,
+            "class_count": expected_count,
+            "output_size": output_size,
+            "model_output_shape": output_shape_from_artifact(model_path),
+            "class_names_path": str(class_names_path(crop)),
+            "model_path": str(model_path),
+            "message": (
+                f"{crop} model has {output_size} outputs but class metadata has "
+                f"{expected_count} classes. Update {crop.upper()}_MODEL_URL to the correct model "
+                "or retrain with the expected dataset classes."
+            ),
+        }
+
+    return None
+
+
 def download_model_if_configured(crop: str) -> Path | None:
     url = configured_model_url(crop)
     if not url:
@@ -351,6 +383,10 @@ def load_crop_model(crop: str):
     class_metadata_path = class_names_path(crop)
     class_metadata_modified_at = class_metadata_path.stat().st_mtime if class_metadata_path.exists() else None
     cache_entry = loaded_models.get(crop)
+    artifact_error = model_artifact_error(crop, model_path)
+    if artifact_error:
+        logger.error("Model artifact validation failed crop=%s error=%s", crop, artifact_error)
+        return None, None, artifact_error
 
     needs_load = (
         cache_entry is None
