@@ -1,6 +1,7 @@
 import os
 import logging
 import shutil
+import time
 from pathlib import Path
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -41,6 +42,7 @@ from ai.predict import (
     predict_image,
     create_gradcam,
     model_status,
+    model_loaded_status,
     ensure_configured_models,
 )
 from ai.recommendations import enrich_prediction
@@ -87,6 +89,8 @@ app = FastAPI(
 # =========================
 @app.on_event("startup")
 async def startup_event():
+    startup_started_at = time.perf_counter()
+    logger.info("startup begin")
     logger.info("Starting AgroMind AI FastAPI backend")
     logger.info("PORT=%s", os.getenv("PORT", "8000"))
     logger.info("Allowed CORS origins=%s", ALLOWED_ORIGINS)
@@ -106,9 +110,13 @@ async def startup_event():
         logger.exception("Database startup warning: %s", str(e))
 
     try:
-        logger.info("Model startup status=%s", ensure_configured_models())
+        logger.info("Model startup artifact status=%s", ensure_configured_models())
     except Exception as e:
         logger.exception("Model startup warning: %s", str(e))
+
+    total_seconds = time.perf_counter() - startup_started_at
+    logger.info("startup end")
+    logger.info("total startup seconds=%.3f", total_seconds)
 
 
 @app.options("/{full_path:path}", include_in_schema=False)
@@ -366,6 +374,11 @@ async def health():
         "missing_env": missing_env,
     }
 
+
+@app.get("/health/models", tags=["System"])
+async def health_models():
+    return model_loaded_status()
+
 # =========================
 # YOLO DETECT
 # =========================
@@ -414,7 +427,7 @@ async def predict_crop(
         if "error" in result:
             logger.error("Prediction returned error crop=%s result=%s", crop, result)
             raise HTTPException(
-                status_code=503,
+                status_code=500,
                 detail={
                     "error": "Prediction service unavailable",
                     "reason": result.get("error"),

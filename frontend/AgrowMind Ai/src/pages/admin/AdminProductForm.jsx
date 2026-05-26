@@ -65,6 +65,31 @@ function normalize(form) {
   };
 }
 
+function fileToProductImage(file) {
+  const maxDimension = 1200;
+  const quality = 0.82;
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read image file"));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error("Could not load image preview"));
+      image.onload = () => {
+        const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext("2d");
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function AdminProductForm() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -105,12 +130,21 @@ export default function AdminProductForm() {
     }));
   }
 
-  function captureImage(field, index, file) {
+  async function captureImage(field, index, file) {
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    if (field === "image") update("image", url);
-    else updateGallery(index, url);
-    toast.success("Image preview ready. Upload storage can be connected next.");
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file");
+      return;
+    }
+
+    try {
+      const imageUrl = await fileToProductImage(file);
+      if (field === "image") update("image", imageUrl);
+      else updateGallery(index, imageUrl);
+      toast.success("Image saved with product");
+    } catch (error) {
+      toast.error(error.message || "Image processing failed");
+    }
   }
 
   async function submit(event) {

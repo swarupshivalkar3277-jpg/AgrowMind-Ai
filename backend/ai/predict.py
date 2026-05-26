@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import shutil
+import threading
 import urllib.error
 import urllib.request
 import zipfile
@@ -36,6 +37,7 @@ IMG_SIZE = 224
 SUPPORTED_CROPS = ("tomato", "mango", "coconut")
 
 loaded_models = {}
+model_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
 MIN_MODEL_BYTES = 1024
 
 
@@ -115,9 +117,24 @@ def keras_output_size_from_config(model_path: Path) -> int | None:
     return int(dense_layers[-1]["config"]["units"])
 
 
+def output_shape_from_artifact(model_path: Path) -> str | None:
+    output_size = keras_output_size_from_config(model_path)
+    if output_size is None:
+        return None
+    return f"(None, {output_size})"
+
+
 def validate_downloaded_model_artifact(crop: str, model_path: Path) -> None:
     expected_count = expected_class_count(crop)
     output_size = keras_output_size_from_config(model_path)
+    logger.info(
+        "Model artifact validation crop=%s download_url=%s downloaded_file_size=%s model_output_shape=%s class_count=%s",
+        crop,
+        configured_model_url(crop),
+        model_path.stat().st_size if model_path.exists() else None,
+        output_shape_from_artifact(model_path),
+        expected_count,
+    )
     if expected_count is None or output_size is None:
         return
     if expected_count != output_size:
@@ -137,11 +154,17 @@ def download_model_if_configured(crop: str) -> Path | None:
     temp_path = destination.with_suffix(".download")
 
     try:
-        logger.info("Downloading %s model from configured URL", crop)
+        logger.info("Downloading model crop=%s download_url=%s", crop, url)
         with urllib.request.urlopen(url, timeout=180) as response:
             with temp_path.open("wb") as output:
                 shutil.copyfileobj(response, output)
 
+        logger.info(
+            "Downloaded model artifact crop=%s download_url=%s downloaded_file_size=%s",
+            crop,
+            url,
+            temp_path.stat().st_size if temp_path.exists() else None,
+        )
         if temp_path.stat().st_size < MIN_MODEL_BYTES:
             temp_path.unlink(missing_ok=True)
             raise RuntimeError(f"Downloaded {crop} model is too small to be valid")
@@ -164,21 +187,44 @@ def ensure_configured_models() -> dict[str, str]:
             if not any(path.exists() for path in candidate_model_paths(crop)) and configured_model_url(crop):
                 download_model_if_configured(crop)
 
-            model, metadata, error = load_crop_model(crop)
-            if error:
-                results[crop] = f"error:{error.get('error')}"
-                logger.error("Model startup check failed crop=%s error=%s", crop, error)
+            model_path = next((path for path in candidate_model_paths(crop) if path.exists()), None)
+            if not model_path:
+                results[crop] = "missing"
+                logger.warning(
+                    "Model startup warning crop=%s download_url=%s reason=model_not_found",
+                    crop,
+                    configured_model_url(crop),
+                )
                 continue
 
-            results[crop] = f"loaded:{loaded_models[crop]['path']}"
+            size_bytes = model_path.stat().st_size
+            expected_count = expected_class_count(crop)
+            output_size = keras_output_size_from_config(model_path)
+            output_shape = output_shape_from_artifact(model_path)
             logger.info(
-                "Model startup loaded crop=%s path=%s classes=%s input_shape=%s output_shape=%s",
+                "Model startup artifact check crop=%s download_url=%s path=%s downloaded_file_size=%s model_output_shape=%s class_count=%s",
                 crop,
-                loaded_models[crop]["path"],
-                metadata.get("class_names"),
-                getattr(model, "input_shape", None),
-                getattr(model, "output_shape", None),
+                configured_model_url(crop),
+                model_path,
+                size_bytes,
+                output_shape,
+                expected_count,
             )
+            if size_bytes < MIN_MODEL_BYTES:
+                results[crop] = "invalid:file_too_small"
+                logger.warning("Model startup warning crop=%s reason=file_too_small size_bytes=%s", crop, size_bytes)
+                continue
+            if expected_count is not None and output_size is not None and expected_count != output_size:
+                results[crop] = "invalid:output_shape_mismatch"
+                logger.warning(
+                    "Model startup warning crop=%s reason=output_shape_mismatch output_size=%s class_count=%s",
+                    crop,
+                    output_size,
+                    expected_count,
+                )
+                continue
+
+            results[crop] = f"available:{model_path}"
         except Exception as exc:
             results[crop] = f"exception:{type(exc).__name__}"
             logger.exception("Model startup exception crop=%s", crop)
@@ -186,6 +232,13 @@ def ensure_configured_models() -> dict[str, str]:
             results[crop] = "missing"
 
     return results
+
+
+def model_loaded_status() -> dict[str, str]:
+    return {
+        crop: "loaded" if crop in loaded_models else "not_loaded"
+        for crop in SUPPORTED_CROPS
+    }
 
 
 def model_status() -> dict:
@@ -208,11 +261,17 @@ def model_status() -> dict:
         except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
             warnings.append(f"class_metadata_unavailable:{exc}")
 
+        model_output_size = keras_output_size_from_config(available_path) if available_path else None
+        if class_metadata and model_output_size is not None and len(class_metadata) != model_output_size:
+            warnings.append("model_output_size_does_not_match_class_metadata")
+
         status[crop] = {
             "available": available_path is not None and not warnings,
             "loaded": crop in loaded_models,
             "path": str(available_path) if available_path else None,
             "size_bytes": size_bytes,
+            "download_url": configured_model_url(crop),
+            "model_output_shape": output_shape_from_artifact(available_path) if available_path else None,
             "class_names_path": str(class_names_path(crop)),
             "metadata_class_count": len(class_metadata),
             "warnings": warnings,
@@ -293,76 +352,96 @@ def load_crop_model(crop: str):
     class_metadata_modified_at = class_metadata_path.stat().st_mtime if class_metadata_path.exists() else None
     cache_entry = loaded_models.get(crop)
 
-    if (
+    needs_load = (
         cache_entry is None
         or cache_entry["path"] != model_path
         or cache_entry["modified_at"] != modified_at
         or cache_entry.get("class_metadata_modified_at") != class_metadata_modified_at
-    ):
-        metadata = load_metadata(crop, model_path)
-        try:
-            class_names = load_class_names(crop)
-        except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
-            logger.exception("Class metadata load failed crop=%s", crop)
-            return None, None, {
-                "error": "Class metadata could not be loaded",
-                "crop": crop,
-                "message": str(exc),
-                "class_names_path": str(class_names_path(crop)),
-            }
+    )
+    if needs_load:
+        with model_locks[crop]:
+            cache_entry = loaded_models.get(crop)
+            needs_load = (
+                cache_entry is None
+                or cache_entry["path"] != model_path
+                or cache_entry["modified_at"] != modified_at
+                or cache_entry.get("class_metadata_modified_at") != class_metadata_modified_at
+            )
+            if not needs_load:
+                entry = loaded_models[crop]
+                return entry["model"], entry["metadata"], None
 
-        try:
-            logger.info("Loading TensorFlow model crop=%s path=%s size_bytes=%s", crop, model_path, model_path.stat().st_size)
-            model = get_tensorflow().keras.models.load_model(model_path, compile=False)
-        except Exception as exc:
-            logger.exception("TensorFlow model load failed crop=%s path=%s", crop, model_path)
-            return None, None, {
-                "error": f"{crop} model could not be loaded",
-                "path": str(model_path),
-                "message": str(exc),
-                "hint": (
-                    "Restore a valid trained .keras/.h5 model file at this path "
-                    "or set MODEL_DIRS to a directory that contains it."
-                ),
-            }
-
-        output_size = int(model.output_shape[-1])
-        if len(class_names) != output_size:
-            return None, None, {
-                "error": "Model output size does not match class metadata",
-                "crop": crop,
-                "class_count": len(class_names),
-                "output_size": output_size,
-                "model_output_shape": str(getattr(model, "output_shape", None)),
-                "class_names_path": str(class_names_path(crop)),
-                "model_path": str(model_path),
-            }
-
-        missing_recommendations = validate_recommendation_coverage(crop, class_names)
-        if missing_recommendations:
-            return None, None, {
-                "error": "Recommendation mappings missing",
-                "crop": crop,
-                "missing_recommendations": missing_recommendations,
-            }
-
-        metadata["class_names"] = class_names
-        loaded_models[crop] = {
-            "path": model_path,
-            "modified_at": modified_at,
-            "class_metadata_modified_at": class_metadata_modified_at,
-            "model": model,
-            "metadata": metadata,
-        }
-        logger.info(
-            "TensorFlow model cached crop=%s path=%s input_shape=%s output_shape=%s",
-            crop,
-            model_path,
-            getattr(model, "input_shape", None),
-            getattr(model, "output_shape", None),
-        )
+            return _load_crop_model_uncached(crop, model_path, modified_at, class_metadata_modified_at)
     else:
         logger.debug("Using cached model crop=%s path=%s", crop, model_path)
+
+    entry = loaded_models[crop]
+    return entry["model"], entry["metadata"], None
+
+
+def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, class_metadata_modified_at: float | None):
+    metadata = load_metadata(crop, model_path)
+    try:
+        class_names = load_class_names(crop)
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+        logger.exception("Class metadata load failed crop=%s", crop)
+        return None, None, {
+            "error": "Class metadata could not be loaded",
+            "crop": crop,
+            "message": str(exc),
+            "class_names_path": str(class_names_path(crop)),
+        }
+
+    try:
+        logger.info("Loading TensorFlow model crop=%s path=%s size_bytes=%s", crop, model_path, model_path.stat().st_size)
+        model = get_tensorflow().keras.models.load_model(model_path, compile=False)
+    except Exception as exc:
+        logger.exception("TensorFlow model load failed crop=%s path=%s", crop, model_path)
+        return None, None, {
+            "error": f"{crop} model could not be loaded",
+            "path": str(model_path),
+            "message": str(exc),
+            "hint": (
+                "Restore a valid trained .keras/.h5 model file at this path "
+                "or set MODEL_DIRS to a directory that contains it."
+            ),
+        }
+
+    output_size = int(model.output_shape[-1])
+    if len(class_names) != output_size:
+        return None, None, {
+            "error": "Model output size does not match class metadata",
+            "crop": crop,
+            "class_count": len(class_names),
+            "output_size": output_size,
+            "model_output_shape": str(getattr(model, "output_shape", None)),
+            "class_names_path": str(class_names_path(crop)),
+            "model_path": str(model_path),
+        }
+
+    missing_recommendations = validate_recommendation_coverage(crop, class_names)
+    if missing_recommendations:
+        return None, None, {
+            "error": "Recommendation mappings missing",
+            "crop": crop,
+            "missing_recommendations": missing_recommendations,
+        }
+
+    metadata["class_names"] = class_names
+    loaded_models[crop] = {
+        "path": model_path,
+        "modified_at": modified_at,
+        "class_metadata_modified_at": class_metadata_modified_at,
+        "model": model,
+        "metadata": metadata,
+    }
+    logger.info(
+        "TensorFlow model cached crop=%s path=%s input_shape=%s output_shape=%s",
+        crop,
+        model_path,
+        getattr(model, "input_shape", None),
+        getattr(model, "output_shape", None),
+    )
 
     entry = loaded_models[crop]
     return entry["model"], entry["metadata"], None
