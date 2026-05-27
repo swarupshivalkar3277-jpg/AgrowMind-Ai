@@ -9,6 +9,7 @@
     "WCLWD_Flaccidity",
     "WCLWD_Yellowing"
   ],
+  "class_count": 6,
   "image_size": [
     224,
     224
@@ -20,8 +21,114 @@
     "CCI_Leaflets": 795,
     "Healthy_Leaves": 123,
     "WCLWD_DryingofLeaflets": 1078,
-    "WCLWD_Flaccidity": 1471,
+    "WCLWD_Flaccidity": 1069,
     "WCLWD_Yellowing": 1084
   },
-  "evaluation": {}
+  "train_distribution": {
+    "CCI_Caterpillars": 809,
+    "CCI_Leaflets": 652,
+    "Healthy_Leaves": 94,
+    "WCLWD_DryingofLeaflets": 860,
+    "WCLWD_Flaccidity": 842,
+    "WCLWD_Yellowing": 855
+  },
+  "validation_distribution": {
+    "CCI_Caterpillars": 181,
+    "CCI_Leaflets": 143,
+    "Healthy_Leaves": 29,
+    "WCLWD_DryingofLeaflets": 218,
+    "WCLWD_Flaccidity": 227,
+    "WCLWD_Yellowing": 229
+  },
+  "validation_accuracy": 0.9873417615890503,
+  "evaluation": {
+    "confusion_matrix": [
+      [
+        181,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        143,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        29,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        218,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        5,
+        0,
+        221,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        4,
+        3,
+        222
+      ]
+    ],
+    "per_class": {
+      "CCI_Caterpillars": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 181
+      },
+      "CCI_Leaflets": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 143
+      },
+      "Healthy_Leaves": {
+        "precision": 0.8529,
+        "recall": 1.0,
+        "f1": 0.9206,
+        "support": 29
+      },
+      "WCLWD_DryingofLeaflets": {
+        "precision": 0.982,
+        "recall": 1.0,
+        "f1": 0.9909,
+        "support": 218
+      },
+      "WCLWD_Flaccidity": {
+        "precision": 0.9866,
+        "recall": 0.9736,
+        "f1": 0.98,
+        "support": 227
+      },
+      "WCLWD_Yellowing": {
+        "precision": 0.9955,
+        "recall": 0.9694,
+        "f1": 0.9823,
+        "support": 229
+      }
+    }
+  }
 }

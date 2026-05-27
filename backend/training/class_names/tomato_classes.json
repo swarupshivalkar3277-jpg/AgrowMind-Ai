@@ -1,12 +1,34 @@
-[
-  "Tomato___Bacterial_spot",
-  "Tomato___Early_blight",
-  "Tomato___Late_blight",
-  "Tomato___Leaf_Mold",
-  "Tomato___Septoria_leaf_spot",
-  "Tomato___Spider_mites Two-spotted_spider_mite",
-  "Tomato___Target_Spot",
-  "Tomato___Tomato_Yellow_Leaf_Curl_Virus",
-  "Tomato___Tomato_mosaic_virus",
-  "Tomato___healthy"
-]
+{
+  "crop": "tomato",
+  "class_names": [
+    "bacterial_spot",
+    "early_blight",
+    "healthy",
+    "late_blight",
+    "leaf_mold",
+    "mosaic_virus",
+    "septoria_leaf_spot",
+    "target_spot",
+    "twospotted_spider_mite",
+    "yellow_leaf_curl_virus"
+  ],
+  "class_count": 10,
+  "dataset_counts": {
+    "bacterial_spot": 1679,
+    "early_blight": 2177,
+    "healthy": 1883,
+    "late_blight": 2093,
+    "leaf_mold": 1460,
+    "mosaic_virus": 1197,
+    "septoria_leaf_spot": 1327,
+    "target_spot": 1110,
+    "twospotted_spider_mite": 1232,
+    "yellow_leaf_curl_virus": 3595
+  },
+  "image_size": [
+    224,
+    224
+  ],
+  "training_date": "2026-05-27T01:03:33.485519+00:00",
+  "validation_accuracy": 0.9450704455375671
+}

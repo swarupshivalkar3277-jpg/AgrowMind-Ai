@@ -3,14 +3,18 @@ from __future__ import annotations
 import json
 import logging
 import os
+import gc
 import shutil
 import threading
+import time
 import urllib.error
 import urllib.request
 import zipfile
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
+import psutil
 from PIL import Image
 
 from ai.recommendations import recommendation_for, validate_recommendation_coverage
@@ -18,6 +22,9 @@ from ai.recommendations import recommendation_for, validate_recommendation_cover
 
 tf = None
 logger = logging.getLogger("agromind.ai.predict")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 BASE_DIR = Path(__file__).resolve().parents[1]
 PROJECT_DIR = BASE_DIR.parent
 AI_DIR = Path(__file__).resolve().parent
@@ -36,9 +43,24 @@ MODEL_DIRS = [
 IMG_SIZE = 224
 SUPPORTED_CROPS = ("tomato", "mango", "coconut")
 
-loaded_models = {}
+loaded_models = OrderedDict()
 model_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
 MIN_MODEL_BYTES = 1024
+MAX_LOADED_MODELS = max(1, int(os.getenv("MAX_LOADED_MODELS", "1")))
+
+
+def memory_snapshot(label: str, **extra) -> dict:
+    process = psutil.Process(os.getpid())
+    memory = process.memory_info()
+    snapshot = {
+        "label": label,
+        "rss_mb": round(memory.rss / 1024 / 1024, 2),
+        "vms_mb": round(memory.vms / 1024 / 1024, 2),
+        "loaded_models": list(loaded_models.keys()),
+        **extra,
+    }
+    logger.info("Memory snapshot %s", snapshot)
+    return snapshot
 
 
 def get_tensorflow():
@@ -48,8 +70,29 @@ def get_tensorflow():
         import tensorflow as tensorflow_module
 
         tf = tensorflow_module
+        try:
+            tf.config.set_visible_devices([], "GPU")
+        except Exception:
+            logger.debug("TensorFlow GPU visibility could not be changed after import", exc_info=True)
+        try:
+            tf.config.threading.set_inter_op_parallelism_threads(int(os.getenv("TF_INTER_OP_THREADS", "1")))
+            tf.config.threading.set_intra_op_parallelism_threads(int(os.getenv("TF_INTRA_OP_THREADS", "1")))
+        except Exception:
+            logger.debug("TensorFlow thread limits could not be set", exc_info=True)
+        memory_snapshot("tensorflow_imported")
 
     return tf
+
+
+def evict_model_cache(except_crop: str | None = None) -> None:
+    while len(loaded_models) > MAX_LOADED_MODELS:
+        evict_crop = next((crop for crop in loaded_models if crop != except_crop), None)
+        if evict_crop is None:
+            return
+        loaded_models.pop(evict_crop, None)
+        logger.info("Evicted TensorFlow model from cache crop=%s max_loaded_models=%s", evict_crop, MAX_LOADED_MODELS)
+        gc.collect()
+        memory_snapshot("model_evicted", crop=evict_crop)
 
 
 def model_path_for_crop(crop: str) -> Path:
@@ -404,6 +447,7 @@ def load_crop_model(crop: str):
                 or cache_entry.get("class_metadata_modified_at") != class_metadata_modified_at
             )
             if not needs_load:
+                loaded_models.move_to_end(crop)
                 entry = loaded_models[crop]
                 return entry["model"], entry["metadata"], None
 
@@ -411,6 +455,7 @@ def load_crop_model(crop: str):
     else:
         logger.debug("Using cached model crop=%s path=%s", crop, model_path)
 
+    loaded_models.move_to_end(crop)
     entry = loaded_models[crop]
     return entry["model"], entry["metadata"], None
 
@@ -429,6 +474,7 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
         }
 
     try:
+        memory_snapshot("before_model_load", crop=crop, path=str(model_path))
         logger.info("Loading TensorFlow model crop=%s path=%s size_bytes=%s", crop, model_path, model_path.stat().st_size)
         model = get_tensorflow().keras.models.load_model(model_path, compile=False)
     except Exception as exc:
@@ -471,6 +517,8 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
         "model": model,
         "metadata": metadata,
     }
+    loaded_models.move_to_end(crop)
+    evict_model_cache(except_crop=crop)
     logger.info(
         "TensorFlow model cached crop=%s path=%s input_shape=%s output_shape=%s",
         crop,
@@ -478,6 +526,7 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
         getattr(model, "input_shape", None),
         getattr(model, "output_shape", None),
     )
+    memory_snapshot("after_model_load", crop=crop, path=str(model_path))
 
     entry = loaded_models[crop]
     return entry["model"], entry["metadata"], None
@@ -563,8 +612,10 @@ def confidence_notes(scores: np.ndarray) -> list[str]:
 
 
 def predict_image(image_path, model_type):
+    started_at = time.perf_counter()
     try:
         logger.info("Prediction started crop=%s image_path=%s", model_type, image_path)
+        memory_snapshot("before_prediction", crop=model_type)
         model, metadata, error = load_crop_model(model_type)
         if error:
             logger.error("Prediction cannot load model crop=%s error=%s", model_type, error)
@@ -610,12 +661,14 @@ def predict_image(image_path, model_type):
         recommendations = recommendation_for(model_type, predicted_class)
         disease = "Unknown Disease" if "low_confidence" in notes else predicted_class
         logger.info(
-            "Prediction complete crop=%s predicted_index=%s disease=%s confidence=%.2f",
+            "Prediction complete crop=%s predicted_index=%s disease=%s confidence=%.2f duration_ms=%.2f",
             model_type,
             predicted_index,
             predicted_class,
             confidence,
+            (time.perf_counter() - started_at) * 1000,
         )
+        memory_snapshot("after_prediction", crop=model_type)
 
         return {
             "crop": model_type,

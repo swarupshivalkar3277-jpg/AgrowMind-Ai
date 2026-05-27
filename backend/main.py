@@ -66,6 +66,9 @@ REQUIRED_ENV_VARS = [
     "RESEND_API_KEY",
     "EMAIL_FROM",
     "ADMIN_REGISTER_SECRET",
+    "CLOUDINARY_CLOUD_NAME",
+    "CLOUDINARY_API_KEY",
+    "CLOUDINARY_API_SECRET",
 ]
 
 
@@ -419,6 +422,7 @@ async def predict_crop(
     validate_crop(crop)
 
     file_path = save_upload(file)
+    started_at = time.perf_counter()
 
     try:
         logger.info("Prediction request crop=%s user=%s file_path=%s filename=%s", crop, user.get("email"), file_path, file.filename)
@@ -489,6 +493,17 @@ async def predict_crop(
         raise HTTPException(
             status_code=500,
             detail="Prediction failed. Check backend logs for details."
+        )
+    finally:
+        try:
+            Path(file_path).unlink(missing_ok=True)
+        except Exception:
+            logger.warning("Could not delete temporary prediction upload path=%s", file_path, exc_info=True)
+        logger.info(
+            "Prediction request finished crop=%s user=%s duration_ms=%.2f",
+            crop,
+            user.get("email"),
+            (time.perf_counter() - started_at) * 1000,
         )
 
 # =========================

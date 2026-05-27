@@ -1,8 +1,10 @@
-const steps = ["pending", "paid", "processing", "shipped", "delivered"];
+const steps = ["ORDER_PLACED", "PAYMENT_SUCCESS", "PROCESSING", "PACKED", "SHIPPED", "OUT_FOR_DELIVERY", "DELIVERED"];
+const cancellable = ["ORDER_PLACED", "PAYMENT_PENDING", "PAYMENT_SUCCESS", "PROCESSING"];
+const refundable = ["PAYMENT_SUCCESS", "PROCESSING", "PACKED", "SHIPPED", "OUT_FOR_DELIVERY", "DELIVERED"];
 
 export default function OrderCard({ order, onCancel, onInvoice, onRefund }) {
-  const canCancel = ["pending", "paid", "processing"].includes(order.order_status);
-  const canRefund = order.payment_method === "razorpay" && order.payment_status === "paid" && ["paid", "processing", "shipped", "delivered"].includes(order.order_status);
+  const canCancel = cancellable.includes(order.order_status);
+  const canRefund = order.payment_method === "razorpay" && order.payment_status === "paid" && refundable.includes(order.order_status);
 
   return (
     <article className="orderCard">

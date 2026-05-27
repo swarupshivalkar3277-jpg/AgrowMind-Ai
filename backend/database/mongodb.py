@@ -217,6 +217,9 @@ async def ensure_indexes() -> None:
     # ======================================
     await db.products.create_index("category")
     await db.products.create_index("stock")
+    await db.products.create_index("stock_quantity")
+    await db.products.create_index("reserved_quantity")
+    await db.products.create_index("sold_quantity")
     await db.products.create_index("created_at")
     await db.products.create_index("crop_type")
     await db.products.create_index("disease_tags")
@@ -239,6 +242,8 @@ async def ensure_indexes() -> None:
     ])
     await db.orders.create_index("order_status")
     await db.orders.create_index("created_at")
+    await db.orders.create_index("transaction_id", sparse=True)
+    await db.orders.create_index("razorpay_order_id", unique=True, sparse=True)
 
     # ======================================
     # PAYMENTS
@@ -249,6 +254,17 @@ async def ensure_indexes() -> None:
     ])
     await db.payments.create_index("payment_id", unique=True, sparse=True)
     await db.payments.create_index("razorpay_order_id", unique=True, sparse=True)
+
+    await db.inventory_logs.create_index([
+        ("product_id", 1),
+        ("created_at", -1),
+    ])
+    await db.inventory_logs.create_index("reason")
+
+    await db.status_history.create_index([
+        ("order_id", 1),
+        ("at", 1),
+    ])
 
     # ======================================
     # WISHLIST

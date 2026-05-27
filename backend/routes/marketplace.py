@@ -4,6 +4,8 @@ import hashlib
 import hmac
 import logging
 import os
+import re
+import base64
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -26,7 +28,32 @@ TAX_RATE = 0.05
 FREE_SHIPPING_THRESHOLD = 999
 DELIVERY_CHARGE = 60
 ORDER_STATUSES = {"pending", "paid", "processing", "shipped", "delivered", "cancelled", "refund_requested", "refunded"}
+ORDER_STATUS_FLOW = [
+    "ORDER_PLACED",
+    "PAYMENT_PENDING",
+    "PAYMENT_SUCCESS",
+    "PROCESSING",
+    "PACKED",
+    "SHIPPED",
+    "OUT_FOR_DELIVERY",
+    "DELIVERED",
+    "CANCELLED",
+    "REFUND_REQUESTED",
+    "REFUNDED",
+]
+ORDER_STATUSES = set(ORDER_STATUS_FLOW) | ORDER_STATUSES
 REFUNDABLE_STATUSES = {"paid", "processing", "shipped", "delivered"}
+REFUNDABLE_STATUSES |= {"PAYMENT_SUCCESS", "PROCESSING", "PACKED", "SHIPPED", "OUT_FOR_DELIVERY", "DELIVERED"}
+LEGACY_STATUS_MAP = {
+    "pending": "ORDER_PLACED",
+    "paid": "PAYMENT_SUCCESS",
+    "processing": "PROCESSING",
+    "shipped": "SHIPPED",
+    "delivered": "DELIVERED",
+    "cancelled": "CANCELLED",
+    "refund_requested": "REFUND_REQUESTED",
+    "refunded": "REFUNDED",
+}
 
 
 class CartItemIn(BaseModel):
@@ -71,6 +98,9 @@ class ProductIn(BaseModel):
     discount: float = Field(default=0, ge=0)
     price: float = Field(ge=0)
     stock: int = Field(default=0, ge=0)
+    stock_quantity: int | None = Field(default=None, ge=0)
+    reserved_quantity: int = Field(default=0, ge=0)
+    sold_quantity: int = Field(default=0, ge=0)
     unit: str = Field(default="piece", max_length=40)
     unit_size: str = Field(default="1 piece", max_length=80)
     sku: str = ""
@@ -87,6 +117,91 @@ class ProductIn(BaseModel):
     rating: float = Field(default=4.0, ge=0, le=5)
 
 
+def normalize_status(status_value: str | None) -> str:
+    if not status_value:
+        return "ORDER_PLACED"
+    return LEGACY_STATUS_MAP.get(status_value, status_value)
+
+
+def stock_available(product: dict) -> int:
+    stock_quantity = int(product.get("stock_quantity", product.get("stock", 0)) or 0)
+    reserved_quantity = int(product.get("reserved_quantity", 0) or 0)
+    return max(0, stock_quantity - reserved_quantity)
+
+
+def normalize_product_document(document: dict) -> dict:
+    stock_quantity = document.get("stock_quantity")
+    if stock_quantity is None:
+        stock_quantity = document.get("stock", 0)
+    document["stock_quantity"] = int(stock_quantity or 0)
+    document["reserved_quantity"] = int(document.get("reserved_quantity", 0) or 0)
+    document["sold_quantity"] = int(document.get("sold_quantity", 0) or 0)
+    document["stock"] = stock_available(document)
+    return document
+
+
+def cloudinary_configured() -> bool:
+    return all(os.getenv(name) for name in ("CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"))
+
+
+async def upload_data_url_to_cloudinary(value: str, folder: str = "agromind/products") -> str:
+    if not value or not value.startswith("data:image/"):
+        return value
+    if not cloudinary_configured():
+        raise HTTPException(status_code=503, detail="Cloudinary is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET.")
+
+    match = re.match(r"data:(image/[\w.+-]+);base64,(.+)", value, re.DOTALL)
+    if not match:
+        raise HTTPException(status_code=400, detail="Invalid image data URL")
+    try:
+        decoded = base64.b64decode(match.group(2), validate=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid base64 image") from exc
+    if len(decoded) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Product image is too large")
+
+    cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME")
+    api_key = os.getenv("CLOUDINARY_API_KEY")
+    api_secret = os.getenv("CLOUDINARY_API_SECRET")
+    timestamp = int(datetime.now(timezone.utc).timestamp())
+    public_id = uuid4().hex
+    signature_payload = f"folder={folder}&public_id={public_id}&timestamp={timestamp}{api_secret}"
+    signature = hashlib.sha1(signature_payload.encode()).hexdigest()
+    files = {"file": ("product.jpg", decoded, match.group(1))}
+    data = {
+        "api_key": api_key,
+        "timestamp": str(timestamp),
+        "folder": folder,
+        "public_id": public_id,
+        "signature": signature,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post(f"https://api.cloudinary.com/v1_1/{cloud_name}/image/upload", data=data, files=files)
+    except httpx.RequestError as exc:
+        logger.exception("Cloudinary upload failed before response")
+        raise HTTPException(status_code=502, detail="Cloudinary upload failed") from exc
+    if response.status_code >= 400:
+        logger.error("Cloudinary upload failed status=%s body=%s", response.status_code, response.text[:500])
+        raise HTTPException(status_code=502, detail="Cloudinary upload failed")
+    url = response.json().get("secure_url")
+    if not url:
+        raise HTTPException(status_code=502, detail="Cloudinary did not return a secure URL")
+    logger.info("Cloudinary upload success public_id=%s", public_id)
+    return url
+
+
+async def prepare_product_payload(payload: ProductIn) -> dict:
+    document = payload.model_dump()
+    document["image"] = await upload_data_url_to_cloudinary(document.get("image", ""))
+    document["gallery"] = [
+        await upload_data_url_to_cloudinary(item)
+        for item in document.get("gallery", [])
+        if item
+    ]
+    return normalize_product_document(document)
+
+
 def object_id(value: str) -> ObjectId:
     try:
         return ObjectId(value)
@@ -95,6 +210,7 @@ def object_id(value: str) -> ObjectId:
 
 
 def serialize_product(product: dict) -> dict:
+    product = normalize_product_document(dict(product))
     return {
         "id": str(product["_id"]),
         "name": product.get("name"),
@@ -107,6 +223,9 @@ def serialize_product(product: dict) -> dict:
         "discount": float(product.get("discount", 0) or 0),
         "price": float(product.get("price", 0)),
         "stock": int(product.get("stock", 0)),
+        "stock_quantity": int(product.get("stock_quantity", 0)),
+        "reserved_quantity": int(product.get("reserved_quantity", 0)),
+        "sold_quantity": int(product.get("sold_quantity", 0)),
         "unit": product.get("unit", "piece"),
         "unit_size": product.get("unit_size", "1 piece"),
         "sku": product.get("sku", ""),
@@ -127,6 +246,7 @@ def serialize_product(product: dict) -> dict:
 
 
 def serialize_order(order: dict) -> dict:
+    status_value = normalize_status(order.get("order_status"))
     return {
         "id": str(order["_id"]),
         "items": order.get("items", []),
@@ -137,8 +257,9 @@ def serialize_order(order: dict) -> dict:
         "total": order.get("total", 0),
         "payment_method": order.get("payment_method"),
         "payment_status": order.get("payment_status"),
-        "order_status": order.get("order_status"),
-        "tracking": order.get("tracking", []),
+        "order_status": status_value,
+        "tracking": order.get("status_history", order.get("tracking", [])),
+        "status_history": order.get("status_history", order.get("tracking", [])),
         "refund_status": order.get("refund_status", "none"),
         "refund_requested_at": order.get("refund_requested_at"),
         "refunded_at": order.get("refunded_at"),
@@ -168,7 +289,7 @@ async def recommended_products(crop: str, disease: str, limit: int = 6) -> list[
 async def ensure_stock(cart: dict) -> None:
     for item in cart["items"]:
         product = await db.products.find_one({"_id": object_id(item["product"]["id"])})
-        if not product or int(product.get("stock", 0)) < int(item["quantity"]):
+        if not product or stock_available(product) < int(item["quantity"]):
             raise HTTPException(status_code=400, detail=f"Insufficient stock for {item['product']['name']}")
 
 
@@ -177,18 +298,43 @@ async def decrement_stock_atomic(cart: dict) -> None:
     for item in cart["items"]:
         product_id = object_id(item["product"]["id"])
         quantity = int(item["quantity"])
+        await db.products.update_one(
+            {"_id": product_id, "stock_quantity": {"$exists": False}},
+            [{"$set": {
+                "stock_quantity": {"$ifNull": ["$stock", 0]},
+                "reserved_quantity": {"$ifNull": ["$reserved_quantity", 0]},
+                "sold_quantity": {"$ifNull": ["$sold_quantity", 0]},
+            }}],
+        )
         product = await db.products.find_one_and_update(
-            {"_id": product_id, "stock": {"$gte": quantity}},
-            {"$inc": {"stock": -quantity}, "$set": {"updated_at": datetime.now(timezone.utc)}},
+            {
+                "_id": product_id,
+                "$expr": {"$gte": [{"$subtract": [{"$ifNull": ["$stock_quantity", "$stock"]}, {"$ifNull": ["$reserved_quantity", 0]}]}, quantity]},
+            },
+            {
+                "$inc": {"stock_quantity": -quantity, "stock": -quantity, "sold_quantity": quantity},
+                "$set": {"updated_at": datetime.now(timezone.utc)},
+            },
             return_document=ReturnDocument.AFTER,
         )
         if product:
             updated.append((product_id, quantity))
+            await log_inventory_change(product_id, -quantity, "sale", {"product_name": item["product"]["name"]})
             continue
 
         for rollback_id, rollback_quantity in updated:
-            await db.products.update_one({"_id": rollback_id}, {"$inc": {"stock": rollback_quantity}})
+            await db.products.update_one({"_id": rollback_id}, {"$inc": {"stock_quantity": rollback_quantity, "stock": rollback_quantity, "sold_quantity": -rollback_quantity}})
         raise HTTPException(status_code=409, detail=f"Insufficient stock for {item['product']['name']}")
+
+
+async def log_inventory_change(product_id: ObjectId, quantity_delta: int, reason: str, metadata: dict | None = None) -> None:
+    await db.inventory_logs.insert_one({
+        "product_id": str(product_id),
+        "quantity_delta": quantity_delta,
+        "reason": reason,
+        "metadata": metadata or {},
+        "created_at": datetime.now(timezone.utc),
+    })
 
 
 async def restore_stock(cart_or_order: dict) -> None:
@@ -198,8 +344,18 @@ async def restore_stock(cart_or_order: dict) -> None:
             continue
         await db.products.update_one(
             {"_id": object_id(product_id)},
-            {"$inc": {"stock": int(item.get("quantity", 0))}, "$set": {"updated_at": datetime.now(timezone.utc)}},
+            {
+                "$inc": {"stock_quantity": int(item.get("quantity", 0)), "stock": int(item.get("quantity", 0)), "sold_quantity": -int(item.get("quantity", 0))},
+                "$set": {"updated_at": datetime.now(timezone.utc)},
+            },
         )
+        await log_inventory_change(object_id(product_id), int(item.get("quantity", 0)), "restore", {"order_id": str(cart_or_order.get("_id", ""))})
+
+
+async def record_status_history(order_id: ObjectId, status_value: str, message: str, actor: str = "system") -> dict:
+    entry = {"order_id": str(order_id), "status": status_value, "message": message, "actor": actor, "at": datetime.now(timezone.utc)}
+    await db.status_history.insert_one(entry)
+    return {key: value for key, value in entry.items() if key != "order_id"}
 
 
 def razorpay_credentials() -> tuple[str, str]:
@@ -316,7 +472,7 @@ async def product_details(product_id: str):
 async def create_product(payload: ProductIn, user=Depends(require_role("admin"))):
     now = datetime.now(timezone.utc)
     document = {
-        **payload.model_dump(),
+        **await prepare_product_payload(payload),
         "seller_id": str(user["_id"]),
         "seller_name": user.get("name", user.get("email", "Seller")),
         "created_at": now,
@@ -335,7 +491,7 @@ async def update_product(product_id: str, payload: ProductIn, user=Depends(requi
 
     product = await db.products.find_one_and_update(
         {"_id": object_id(product_id)},
-        {"$set": {**payload.model_dump(), "updated_at": datetime.now(timezone.utc)}},
+        {"$set": {**await prepare_product_payload(payload), "updated_at": datetime.now(timezone.utc)}},
         return_document=ReturnDocument.AFTER,
     )
     if not product:
@@ -364,7 +520,7 @@ async def add_cart_item(payload: CartItemIn, user=Depends(get_current_user)):
     product = await db.products.find_one({"_id": object_id(payload.product_id)})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    if product.get("stock", 0) < payload.quantity:
+    if stock_available(product) < payload.quantity:
         raise HTTPException(status_code=400, detail="Insufficient stock")
 
     cart = await cart_document(str(user["_id"]))
@@ -549,14 +705,16 @@ async def verify_razorpay_payment(payload: RazorpayVerifyRequest, user=Depends(g
         "total": cart["total"],
         "payment_method": "razorpay",
         "payment_status": "paid",
-        "order_status": "paid",
-        "tracking": [{"status": "paid", "message": "Payment verified and order received", "at": now}],
+        "order_status": "PAYMENT_SUCCESS",
+        "tracking": [{"status": "PAYMENT_SUCCESS", "message": "Payment verified and order received", "at": now}],
+        "status_history": [{"status": "PAYMENT_SUCCESS", "message": "Payment verified and order received", "actor": "system", "at": now}],
         "transaction_id": payload.razorpay_payment_id,
         "razorpay_order_id": payload.razorpay_order_id,
         "created_at": now,
         "updated_at": now,
     }
     result = await db.orders.insert_one(order)
+    await record_status_history(result.inserted_id, "PAYMENT_SUCCESS", "Payment verified and order received")
     await db.payments.update_one(
         {"_id": payment["_id"], "status": {"$ne": "paid"}},
         {
@@ -620,7 +778,7 @@ async def checkout(payload: CheckoutAddress, user=Depends(get_current_user)):
 
     await decrement_stock_atomic(cart)
     now = datetime.now(timezone.utc)
-    order_status = "paid" if payment_status == "paid" else "pending"
+    order_status = "PAYMENT_SUCCESS" if payment_status == "paid" else "PAYMENT_PENDING"
     tracking_message = "Order placed with Cash on Delivery" if payment_method == "cash_on_delivery" else "Order received"
     order = {
         "user_id": str(user["_id"]),
@@ -635,11 +793,13 @@ async def checkout(payload: CheckoutAddress, user=Depends(get_current_user)):
         "payment_status": payment_status,
         "order_status": order_status,
         "tracking": [{"status": order_status, "message": tracking_message, "at": now}],
+        "status_history": [{"status": order_status, "message": tracking_message, "actor": "system", "at": now}],
         "transaction_id": transaction_id,
         "created_at": now,
         "updated_at": now,
     }
     result = await db.orders.insert_one(order)
+    await record_status_history(result.inserted_id, order_status, tracking_message)
     await db.payments.insert_one({
         "user_id": str(user["_id"]),
         "order_id": str(result.inserted_id),
@@ -674,20 +834,21 @@ async def cancel_order(order_id: str, user=Depends(get_current_user)):
     order = await db.orders.find_one({"_id": object_id(order_id), "user_id": str(user["_id"])})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    if order.get("order_status") in {"shipped", "delivered", "refund_requested", "refunded", "cancelled"}:
+    if normalize_status(order.get("order_status")) in {"SHIPPED", "DELIVERED", "REFUND_REQUESTED", "REFUNDED", "CANCELLED"}:
         raise HTTPException(status_code=400, detail="Order can no longer be cancelled")
 
     now = datetime.now(timezone.utc)
     await restore_stock(order)
+    status_entry = await record_status_history(order["_id"], "CANCELLED", "Cancelled by user. Stock restored.", "customer")
     updated = await db.orders.find_one_and_update(
         {"_id": object_id(order_id)},
         {
             "$set": {
-                "order_status": "cancelled",
+                "order_status": "CANCELLED",
                 "payment_status": "cancelled" if order.get("payment_method") == "cash_on_delivery" else order.get("payment_status", "paid"),
                 "updated_at": now,
             },
-            "$push": {"tracking": {"status": "cancelled", "message": "Cancelled by user. Stock restored.", "at": now}},
+            "$push": {"tracking": {"status": "CANCELLED", "message": "Cancelled by user. Stock restored.", "at": now}, "status_history": status_entry},
         },
         return_document=ReturnDocument.AFTER,
     )
@@ -701,20 +862,21 @@ async def request_refund(order_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Order not found")
     if order.get("payment_method") != "razorpay" or order.get("payment_status") != "paid":
         raise HTTPException(status_code=400, detail="Refund is available only for paid Razorpay orders")
-    if order.get("order_status") not in REFUNDABLE_STATUSES:
+    if normalize_status(order.get("order_status")) not in REFUNDABLE_STATUSES:
         raise HTTPException(status_code=400, detail="Order is not eligible for refund")
 
     now = datetime.now(timezone.utc)
+    status_entry = await record_status_history(order["_id"], "REFUND_REQUESTED", "Refund requested. Admin will process manually.", "customer")
     updated = await db.orders.find_one_and_update(
         {"_id": order["_id"]},
         {
             "$set": {
-                "order_status": "refund_requested",
+                "order_status": "REFUND_REQUESTED",
                 "refund_status": "requested",
                 "refund_requested_at": now,
                 "updated_at": now,
             },
-            "$push": {"tracking": {"status": "refund_requested", "message": "Refund requested. Admin will process manually.", "at": now}},
+            "$push": {"tracking": {"status": "REFUND_REQUESTED", "message": "Refund requested. Admin will process manually.", "at": now}, "status_history": status_entry},
         },
         return_document=ReturnDocument.AFTER,
     )

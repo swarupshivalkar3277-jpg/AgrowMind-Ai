@@ -113,3 +113,15 @@ backend/vector_db/*
 !backend/vector_db/.gitkeep
 backend/vector_db/
 backend/knowledge_base/**/*.pdf
+# AI Models
+backend/training/*.keras
+
+# RAG Vector DB
+backend/rag/chroma_db/
+
+# Uploads
+backend/uploads/
+
+# Environment files
+.env
+.env.*

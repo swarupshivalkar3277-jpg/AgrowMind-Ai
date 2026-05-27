@@ -11,6 +11,7 @@
     "die back",
     "healthy"
   ],
+  "class_count": 8,
   "image_size": [
     224,
     224
@@ -18,18 +19,74 @@
   "input_scale": "model_includes_mobilenetv2_rescaling_-1_to_1",
   "temperature": 1.0,
   "dataset_counts": {
+    "anthracnose": 2075,
     "Bacterial Canker": 2894,
     "Cutting Weevil": 1890,
-    "Gall Midge": 2552,
-    "Powdery Mildew": 982,
-    "Sooty Mould": 1590,
-    "anthracnose": 2075,
     "die back": 1600,
-    "healthy": 1500
+    "Gall Midge": 2552,
+    "healthy": 1500,
+    "Powdery Mildew": 982,
+    "Sooty Mould": 1590
   },
+  "train_distribution": {
+    "Bacterial Canker": 2316,
+    "Cutting Weevil": 1492,
+    "Gall Midge": 2057,
+    "Powdery Mildew": 774,
+    "Sooty Mould": 1284,
+    "anthracnose": 1652,
+    "die back": 1274,
+    "healthy": 1217
+  },
+  "validation_distribution": {
+    "Bacterial Canker": 578,
+    "Cutting Weevil": 398,
+    "Gall Midge": 495,
+    "Powdery Mildew": 207,
+    "Sooty Mould": 306,
+    "anthracnose": 423,
+    "die back": 326,
+    "healthy": 283
+  },
+  "validation_accuracy": 0.988726794719696,
   "evaluation": {
     "confusion_matrix": [
       [
+        572,
+        0,
+        1,
+        0,
+        0,
+        5,
+        0,
+        0
+      ],
+      [
+        0,
+        397,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        482,
+        0,
+        12,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        207,
+        0,
         0,
         0,
         0
@@ -37,32 +94,92 @@
       [
         0,
         0,
+        0,
+        0,
+        306,
+        0,
+        0,
+        0
+      ],
+      [
+        6,
+        7,
+        1,
+        0,
+        0,
+        408,
+        0,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        326,
         0
       ],
       [
         0,
         0,
-        6
+        0,
+        0,
+        0,
+        0,
+        0,
+        283
       ]
     ],
     "per_class": {
-      "anthracnose": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "support": 0
+      "Bacterial Canker": {
+        "precision": 0.9896,
+        "recall": 0.9896,
+        "f1": 0.9896,
+        "support": 578
       },
-      "healthy": {
-        "precision": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-        "support": 0
+      "Cutting Weevil": {
+        "precision": 0.9827,
+        "recall": 0.9975,
+        "f1": 0.99,
+        "support": 398
       },
-      "powdery_mildew": {
+      "Gall Midge": {
+        "precision": 0.9959,
+        "recall": 0.9737,
+        "f1": 0.9847,
+        "support": 495
+      },
+      "Powdery Mildew": {
         "precision": 1.0,
         "recall": 1.0,
         "f1": 1.0,
-        "support": 6
+        "support": 207
+      },
+      "Sooty Mould": {
+        "precision": 0.9623,
+        "recall": 1.0,
+        "f1": 0.9808,
+        "support": 306
+      },
+      "anthracnose": {
+        "precision": 0.9831,
+        "recall": 0.9645,
+        "f1": 0.9737,
+        "support": 423
+      },
+      "die back": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 326
+      },
+      "healthy": {
+        "precision": 0.9965,
+        "recall": 1.0,
+        "f1": 0.9982,
+        "support": 283
       }
     }
   }

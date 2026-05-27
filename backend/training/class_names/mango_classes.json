@@ -1,10 +1,30 @@
-[
-  "Bacterial Canker",
-  "Cutting Weevil",
-  "Gall Midge",
-  "Powdery Mildew",
-  "Sooty Mould",
-  "anthracnose",
-  "die back",
-  "healthy"
-]
+{
+  "crop": "mango",
+  "class_names": [
+    "Bacterial Canker",
+    "Cutting Weevil",
+    "Gall Midge",
+    "Powdery Mildew",
+    "Sooty Mould",
+    "anthracnose",
+    "die back",
+    "healthy"
+  ],
+  "class_count": 8,
+  "dataset_counts": {
+    "anthracnose": 2075,
+    "Bacterial Canker": 2894,
+    "Cutting Weevil": 1890,
+    "die back": 1600,
+    "Gall Midge": 2552,
+    "healthy": 1500,
+    "Powdery Mildew": 982,
+    "Sooty Mould": 1590
+  },
+  "image_size": [
+    224,
+    224
+  ],
+  "training_date": "2026-05-27T01:06:24.230798+00:00",
+  "validation_accuracy": 0.988726794719696
+}

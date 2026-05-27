@@ -32,25 +32,17 @@ EXPECTED_CLASS_COUNTS = {
 }
 EXPECTED_CLASSES = {
     "tomato": [
-        "Tomato___Bacterial_spot",
-        "Tomato___Early_blight",
-        "Tomato___healthy",
-        "Tomato___Late_blight",
-        "Tomato___Leaf_Mold",
-        "Tomato___Septoria_leaf_spot",
-        "Tomato___Spider_mites Two-spotted_spider_mite",
-        "Tomato___Target_Spot",
-        "Tomato___Tomato_mosaic_virus",
-        "Tomato___Tomato_Yellow_Leaf_Curl_Virus",
-    ],
-    "coconut": [
-        "CCI_Caterpillars",
-        "CCI_Leaflets",
-        "Healthy_Leaves",
-        "WCLWD_DryingofLeaflets",
-        "WCLWD_Flaccidity",
-        "WCLWD_Yellowing",
-    ],
+    "bacterial_spot",
+    "early_blight",
+    "healthy",
+    "late_blight",
+    "leaf_mold",
+    "mosaic_virus",
+    "septoria_leaf_spot",
+    "target_spot",
+    "twospotted_spider_mite",
+    "yellow_leaf_curl_virus",
+],
 }
 
 

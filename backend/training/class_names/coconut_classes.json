@@ -1,8 +1,26 @@
-[
-  "CCI_Caterpillars",
-  "CCI_Leaflets",
-  "Healthy_Leaves",
-  "WCLWD_DryingofLeaflets",
-  "WCLWD_Flaccidity",
-  "WCLWD_Yellowing"
-]
+{
+  "crop": "coconut",
+  "class_names": [
+    "CCI_Caterpillars",
+    "CCI_Leaflets",
+    "Healthy_Leaves",
+    "WCLWD_DryingofLeaflets",
+    "WCLWD_Flaccidity",
+    "WCLWD_Yellowing"
+  ],
+  "class_count": 6,
+  "dataset_counts": {
+    "CCI_Caterpillars": 990,
+    "CCI_Leaflets": 795,
+    "Healthy_Leaves": 123,
+    "WCLWD_DryingofLeaflets": 1078,
+    "WCLWD_Flaccidity": 1069,
+    "WCLWD_Yellowing": 1084
+  },
+  "image_size": [
+    224,
+    224
+  ],
+  "training_date": "2026-05-26T08:45:58.600034+00:00",
+  "validation_accuracy": 0.9873417615890503
+}

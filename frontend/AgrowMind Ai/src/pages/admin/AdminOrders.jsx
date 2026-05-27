@@ -4,7 +4,7 @@ import toast from "react-hot-toast";
 
 import { getAdminOrders, updateAdminOrderStatus } from "../../services/authService";
 
-const statuses = ["pending", "paid", "processing", "shipped", "delivered", "cancelled", "refund_requested", "refunded"];
+const statuses = ["ORDER_PLACED", "PAYMENT_PENDING", "PAYMENT_SUCCESS", "PROCESSING", "PACKED", "SHIPPED", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED", "REFUND_REQUESTED", "REFUNDED"];
 
 export default function AdminOrders() {
   const [orders, setOrders] = useState([]);

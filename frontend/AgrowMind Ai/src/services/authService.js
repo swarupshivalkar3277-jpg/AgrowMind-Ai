@@ -120,6 +120,10 @@ export function getHistory() {
   return cachedGet("/history");
 }
 
+export function askAssistant(payload) {
+  return api.post("/rag/query", payload);
+}
+
 export function getProducts(params = {}) {
   return cachedGet("/marketplace/products", { params });
 }

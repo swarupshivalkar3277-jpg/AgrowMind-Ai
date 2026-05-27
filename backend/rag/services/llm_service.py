@@ -46,8 +46,13 @@ class LLMService:
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1200},
         }
-        async with httpx.AsyncClient(timeout=45) as client:
-            response = await client.post(url, params={"key": api_key}, json=payload)
+        logger.info("Gemini request started model=%s prompt_chars=%s", GEMINI_MODEL, len(prompt))
+        try:
+            async with httpx.AsyncClient(timeout=45) as client:
+                response = await client.post(url, params={"key": api_key}, json=payload)
+        except httpx.RequestError as exc:
+            logger.exception("Gemini request failed before response model=%s", GEMINI_MODEL)
+            raise HTTPException(status_code=502, detail="Gemini is unreachable from the backend") from exc
         if response.status_code >= 400:
             logger.error("Gemini RAG request failed status=%s body=%s", response.status_code, response.text[:500])
             raise HTTPException(status_code=502, detail="Gemini RAG generation failed")
@@ -58,6 +63,7 @@ class LLMService:
         answer = "".join(part.get("text", "") for part in parts).strip()
         if not answer:
             raise HTTPException(status_code=502, detail="Gemini returned an empty RAG answer")
+        logger.info("Gemini response received model=%s answer_chars=%s", GEMINI_MODEL, len(answer))
         return answer
 
     async def _generate_with_openai(self, prompt: str) -> str:
@@ -124,4 +130,3 @@ class LLMService:
 
 def get_llm_service() -> LLMService:
     return LLMService()
-

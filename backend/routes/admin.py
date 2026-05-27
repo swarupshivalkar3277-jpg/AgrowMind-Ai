@@ -13,7 +13,7 @@ from pymongo import ReturnDocument
 from auth.deps import require_role
 from auth.models import user_public
 from database.mongodb import db
-from routes.marketplace import ORDER_STATUSES, ProductIn, object_id, restore_stock, serialize_order, serialize_product
+from routes.marketplace import ORDER_STATUSES, ProductIn, object_id, prepare_product_payload, record_status_history, restore_stock, serialize_order, serialize_product
 
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -116,7 +116,7 @@ async def update_order_status(order_id: str, status_value: str = Query(...), use
         raise HTTPException(status_code=404, detail="Order not found")
 
     set_fields = {"order_status": status_value, "updated_at": now}
-    if status_value == "refunded":
+    if status_value == "REFUNDED":
         if existing.get("payment_method") == "razorpay" and existing.get("transaction_id"):
             key_id = os.getenv("RAZORPAY_KEY_ID")
             key_secret = os.getenv("RAZORPAY_KEY_SECRET")
@@ -133,11 +133,12 @@ async def update_order_status(order_id: str, status_value: str = Query(...), use
         set_fields.update({"payment_status": "refunded", "refund_status": "refunded", "refunded_at": now})
         await restore_stock(existing)
 
+    status_entry = await record_status_history(existing["_id"], status_value, f"Order marked {status_value}", "admin")
     order = await db.orders.find_one_and_update(
         {"_id": object_id(order_id)},
         {
             "$set": set_fields,
-            "$push": {"tracking": {"status": status_value, "message": f"Order marked {status_value}", "at": now}},
+            "$push": {"tracking": {"status": status_value, "message": f"Order marked {status_value}", "at": now}, "status_history": status_entry},
         },
         return_document=ReturnDocument.AFTER,
     )
@@ -151,7 +152,7 @@ async def analytics(user=Depends(require_role("admin"))):
     total_users = await db.users.count_documents({})
     total_farmers = await db.users.count_documents({"role": "farmer"})
     total_orders = await db.orders.count_documents({})
-    pending_orders = await db.orders.count_documents({"order_status": "pending"})
+    pending_orders = await db.orders.count_documents({"order_status": {"$in": ["pending", "ORDER_PLACED", "PAYMENT_PENDING"]}})
     low_stock_products = await db.products.count_documents({"stock": {"$lte": 5}})
     total_ai_predictions = await db.prediction_history.count_documents({})
     revenue_rows = db.orders.aggregate([
@@ -192,7 +193,7 @@ async def analytics(user=Depends(require_role("admin"))):
 async def create_admin_product(payload: ProductIn, user=Depends(require_role("admin"))):
     now = datetime.now(timezone.utc)
     document = {
-        **payload.model_dump(),
+        **await prepare_product_payload(payload),
         "seller_id": str(user["_id"]),
         "seller_name": user.get("name", user.get("email", "AgroMind Admin")),
         "created_at": now,
@@ -207,7 +208,7 @@ async def create_admin_product(payload: ProductIn, user=Depends(require_role("ad
 async def update_admin_product(product_id: str, payload: ProductIn, user=Depends(require_role("admin"))):
     product = await db.products.find_one_and_update(
         {"_id": object_id(product_id)},
-        {"$set": {**payload.model_dump(), "updated_at": datetime.now(timezone.utc)}},
+        {"$set": {**await prepare_product_payload(payload), "updated_at": datetime.now(timezone.utc)}},
         return_document=ReturnDocument.AFTER,
     )
     if not product:

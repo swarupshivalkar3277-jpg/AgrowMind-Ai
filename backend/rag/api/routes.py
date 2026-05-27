@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+import logging
 
 from auth.deps import get_current_user
 from rag.services.rag_service import answer_question
 from routes.marketplace import recommended_products
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
+logger = logging.getLogger("agromind.rag.api")
 
 
 class RAGQueryRequest(BaseModel):
@@ -18,6 +20,7 @@ class RAGQueryRequest(BaseModel):
 
 @router.post("/query")
 async def query_rag(payload: RAGQueryRequest, user=Depends(get_current_user)):
+    logger.info("RAG request received user=%s question_chars=%s crop=%s disease=%s", user.get("email"), len(payload.question), payload.crop, payload.disease)
     result = await answer_question(payload.question, user=user, save_history=True)
     products: list[dict] = []
     if payload.crop and payload.disease:
@@ -29,9 +32,9 @@ async def query_rag(payload: RAGQueryRequest, user=Depends(get_current_user)):
             products = []
 
     return {
+        "success": True,
         "answer": result["answer"],
         "sources": result["sources"],
         "recommended_products": products,
         "provider": result.get("provider"),
     }
-
