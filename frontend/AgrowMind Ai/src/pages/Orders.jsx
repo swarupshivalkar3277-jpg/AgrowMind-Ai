@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { ShoppingBag } from "lucide-react";
 
 import EmptyState from "../components/EmptyState";
@@ -9,6 +9,8 @@ import { downloadPredictionReport } from "../utils/reportPdf";
 
 export default function Orders() {
   const [orders, setOrders] = useState([]);
+  const [status, setStatus] = useState("all");
+  const [params] = useSearchParams();
 
   async function refresh() {
     const { data } = await getOrders();
@@ -18,6 +20,13 @@ export default function Orders() {
   useEffect(() => {
     refresh().catch(() => setOrders([]));
   }, []);
+
+  const filtered = useMemo(() => {
+    if (status === "all") return orders;
+    return orders.filter((order) => order.order_status === status);
+  }, [orders, status]);
+
+  const trackedOrder = orders.find((order) => order.id === params.get("track"));
 
   async function handleCancel(orderId) {
     await cancelOrder(orderId);
@@ -30,8 +39,8 @@ export default function Orders() {
   }
 
   return (
-    <main className="pageStack">
-      <section className="panel">
+    <main className="pageStack shopAccountPage">
+      <section className="panel ordersPanel">
         <div className="sectionHeader">
           <div>
             <span className="eyebrowText">Orders</span>
@@ -39,8 +48,24 @@ export default function Orders() {
           </div>
           <span>{orders.length} orders</span>
         </div>
+        <div className="orderFilters">
+          {["all", "ORDER_PLACED", "SHIPPED", "DELIVERED", "CANCELLED", "REFUNDED"].map((item) => (
+            <button className={status === item ? "active" : ""} key={item} onClick={() => setStatus(item)} type="button">{item.replaceAll("_", " ")}</button>
+          ))}
+        </div>
+        {trackedOrder && (
+          <section className="trackingPanel">
+            <h2>Tracking #{trackedOrder.id.slice(-8)}</h2>
+            <div className="trackingTimeline">
+              {(trackedOrder.status_history || trackedOrder.tracking || []).map((item, index) => (
+                <span className="done" key={`${item.status}-${index}`}><strong>{item.status.replaceAll("_", " ")}</strong><small>{item.message}</small></span>
+              ))}
+            </div>
+            <p>Courier details and delivery partner information will appear after shipment is assigned.</p>
+          </section>
+        )}
         <div className="orderList">
-          {orders.map((order) => (
+          {filtered.map((order) => (
             <OrderCard
               key={order.id}
               onCancel={handleCancel}
@@ -49,7 +74,7 @@ export default function Orders() {
               order={order}
             />
           ))}
-          {orders.length === 0 && (
+          {filtered.length === 0 && (
             <EmptyState
               action={<Link className="primaryButton" to="/marketplace">Browse Marketplace</Link>}
               icon={ShoppingBag}

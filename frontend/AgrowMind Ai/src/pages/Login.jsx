@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
+import { CheckCircle2, Leaf, Mail, ShieldCheck, Smartphone } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { useAuth } from "../context/AuthContext";
@@ -33,6 +35,7 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
   const [submitting, setSubmitting] = useState(false);
   const [sendingOtp, setSendingOtp] = useState(false);
   const [otpCooldown, setOtpCooldown] = useState(0);
+  const otpDigits = Array.from({ length: 6 }, (_, index) => otpCode[index] || "");
 
   useEffect(() => {
     if (!otpCooldown) {
@@ -86,10 +89,25 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
   }
 
   return (
-    <section className="authPanel">
-      {!startForgot && <button className="backButton" onClick={onHome} type="button">Back to home</button>}
+    <section className="marketAuthShell">
+      <motion.aside className="authWelcome" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
+        <button className="backButton" onClick={onHome} type="button">Back to home</button>
+        <div className="authLogo"><Leaf size={26} /><strong>AgroMind</strong></div>
+        <h1>{forgotMode ? "Reset securely with OTP" : "Welcome to AgroMind Marketplace"}</h1>
+        <p>Buy verified farm inputs, track orders, and get AI-matched recommendations for tomato, mango, and coconut crops.</p>
+        <div className="authIllustration">
+          <span><ShieldCheck size={22} /> Secure payments</span>
+          <span><CheckCircle2 size={22} /> Verified sellers</span>
+          <span><Smartphone size={22} /> OTP protected login</span>
+        </div>
+      </motion.aside>
+      <motion.div className="authPanel premiumAuthPanel" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}>
       <p className="eyebrow">{forgotMode ? "Reset Password" : "Welcome Back"}</p>
-      <h1>{forgotMode ? "Forgot Password" : "AgroMind AI"}</h1>
+      <h1>{forgotMode ? "Forgot Password" : "Login"}</h1>
+      <div className="loginTabs">
+        <button className="active" type="button"><Mail size={16} /> Email</button>
+        <button type="button"><Smartphone size={16} /> Mobile OTP</button>
+      </div>
       <form className="authForm" onSubmit={handleSubmit}>
         <label>
           <span>Email</span>
@@ -145,9 +163,12 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
             {sendingOtp ? "Sending..." : otpCooldown > 0 ? `Wait ${otpCooldown}s` : "Send OTP"}
           </button>
         </div>
-        {message && <div className="successAlert">{message}</div>}
-        {(error || searchParams.get("error")) && <div className="alert">{error || searchParams.get("error")}</div>}
-        <button disabled={submitting} type="submit">
+        <div className="otpBoxes" aria-hidden="true">{otpDigits.map((digit, index) => <span key={index}>{digit}</span>)}</div>
+        <AnimatePresence>
+          {message && <motion.div className="successAlert" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>{message}</motion.div>}
+          {(error || searchParams.get("error")) && <motion.div className="alert" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>{error || searchParams.get("error")}</motion.div>}
+        </AnimatePresence>
+        <button className="primaryButton" disabled={submitting} type="submit">
           {submitting ? "Please wait..." : forgotMode ? "Reset Password" : "Login"}
         </button>
       </form>
@@ -159,6 +180,7 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
         Create an account
       </button>
       {!forgotMode && <GoogleAuthButton />}
+      </motion.div>
     </section>
   );
 }

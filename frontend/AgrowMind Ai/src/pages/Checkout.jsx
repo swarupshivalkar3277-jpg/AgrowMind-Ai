@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { CheckCircle2, CreditCard, MapPin, PackageCheck, ShieldCheck, Truck } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { useCart } from "../context/CartContext";
@@ -129,14 +130,21 @@ export default function Checkout() {
   }
 
   return (
-    <main className="pageStack">
-      <section className="checkoutGrid">
+    <main className="pageStack shopAccountPage">
+      <section className="shopPageHeader">
+        <div><span>Secure Checkout</span><h1>Complete your order</h1></div>
+      </section>
+      <section className="checkoutSteps" aria-label="Checkout progress">
+        {["Address", "Delivery", "Payment", "Confirmation"].map((step, index) => <span className={index === 0 ? "active" : ""} key={step}><CheckCircle2 size={17} /> {step}</span>)}
+      </section>
+      <section className="checkoutGrid premiumCheckout">
         <form className="panel checkoutForm" onSubmit={submit}>
           <div>
             <span className="eyebrowText">Secure Checkout</span>
             <h1>Shipping and payment</h1>
             <p className="mutedText">Razorpay supports UPI, cards, net banking, and wallets. Orders are created after backend signature verification.</p>
           </div>
+          <div className="checkoutBlockTitle"><MapPin size={18} /><strong>Step 1: Address</strong></div>
           {["full_name", "mobile", "address", "state", "district", "pin_code"].map((field) => (
             <label key={field}>
               <span>{field.replaceAll("_", " ")}</span>
@@ -150,6 +158,8 @@ export default function Checkout() {
             </div>
             <button className="secondaryButton" onClick={useLiveLocation} type="button">Use Live Location</button>
           </div>
+          <div className="checkoutBlockTitle"><Truck size={18} /><strong>Step 2: Delivery</strong><span>Standard delivery in 2-5 days</span></div>
+          <div className="checkoutBlockTitle"><CreditCard size={18} /><strong>Step 3: Payment</strong></div>
           <label>
             <span>Payment method</span>
             <select onChange={(event) => update("payment_method", event.target.value)} value={form.payment_method}>
@@ -158,11 +168,12 @@ export default function Checkout() {
             </select>
           </label>
           {error && <div className="alert">{error}</div>}
-          <button disabled={loading || cart.items.length === 0 || cart.items.some((item) => item.product.stock <= 0 || item.quantity > item.product.stock)} type="submit">
+          <button className="primaryButton" disabled={loading || cart.items.length === 0 || cart.items.some((item) => item.product.stock <= 0 || item.quantity > item.product.stock)} type="submit">
             {loading ? "Processing..." : "Place Order"}
           </button>
         </form>
-        <aside className="panel orderSummary">
+        <aside className="panel orderSummary premiumSummary">
+          <p><ShieldCheck size={16} /> Payment verified by backend before order creation.</p>
           <h2>Order Summary</h2>
           {cart.items.length === 0 && <span>Your cart is empty.</span>}
           {cart.items.map((item) => (
@@ -174,7 +185,7 @@ export default function Checkout() {
           ))}
           <span>Tax Rs. {cart.tax}</span>
           <span>Shipping Rs. {cart.shipping}</span>
-          <strong>Total Rs. {cart.total}</strong>
+          <strong><PackageCheck size={18} /> Total Rs. {cart.total}</strong>
         </aside>
       </section>
     </main>
