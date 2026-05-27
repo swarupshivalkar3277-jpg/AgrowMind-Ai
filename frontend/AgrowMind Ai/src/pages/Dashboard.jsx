@@ -64,6 +64,19 @@ export default function Dashboard() {
 
       <DashboardStats historyCount={history.length} orderCount={orders.length} />
 
+      <section className="panel cropDashboard">
+        <div className="sectionHeader">
+          <div><span className="eyebrowText">AI Crop Dashboard</span><h2>Saved crop intelligence</h2></div>
+          <Link className="textButton" to="/assistant">Ask AI</Link>
+        </div>
+        <div className="cropDashboardGrid">
+          <article><strong>Saved crops</strong><span>Tomato, Mango, Coconut</span></article>
+          <article><strong>Disease history</strong><span>{history.length} scans stored</span></article>
+          <article><strong>Recommendations</strong><span>{recentDiseases[0]?.prediction?.recommendation?.treatment?.[0] || "Scan a crop for tailored advice"}</span></article>
+          <article><strong>Weather insights</strong><span>Review weather-aware actions before spraying.</span></article>
+        </div>
+      </section>
+
       <section className="overviewGrid">
         <section className="panel softPanel">
           <div className="sectionHeader">

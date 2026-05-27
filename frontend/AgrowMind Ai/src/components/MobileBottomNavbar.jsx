@@ -1,11 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { FileText, Home, ScanSearch, ShoppingBag, UserRound } from "lucide-react";
+import { Bot, Home, ScanSearch, ShoppingBag, UserRound } from "lucide-react";
 
 const items = [
   { to: "/dashboard", label: "Home", icon: Home },
   { to: "/diagnose", label: "Diagnose", icon: ScanSearch },
   { to: "/marketplace", label: "Market", icon: ShoppingBag },
-  { to: "/reports", label: "Reports", icon: FileText },
+  { to: "/assistant", label: "AI", icon: Bot },
   { to: "/settings", label: "Profile", icon: UserRound },
 ];
 

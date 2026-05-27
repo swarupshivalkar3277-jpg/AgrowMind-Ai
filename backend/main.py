@@ -2,6 +2,7 @@ import os
 import logging
 import shutil
 import time
+import asyncio
 from pathlib import Path
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -58,6 +59,10 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger("agromind.api")
+PREDICTION_CONCURRENCY = max(1, int(os.getenv("PREDICTION_CONCURRENCY", "1")))
+PREDICTION_TIMEOUT_SECONDS = max(30, int(os.getenv("PREDICTION_TIMEOUT_SECONDS", "150")))
+UPLOAD_CLEANUP_MAX_AGE_SECONDS = max(300, int(os.getenv("UPLOAD_CLEANUP_MAX_AGE_SECONDS", "1800")))
+prediction_semaphore = asyncio.Semaphore(PREDICTION_CONCURRENCY)
 
 REQUIRED_ENV_VARS = [
     "MONGO_URL",
@@ -123,6 +128,20 @@ async def startup_event():
     total_seconds = time.perf_counter() - startup_started_at
     logger.info("startup end")
     logger.info("total startup seconds=%.3f", total_seconds)
+    asyncio.create_task(cleanup_uploads_loop())
+
+
+async def cleanup_uploads_loop():
+    while True:
+        try:
+            cutoff = time.time() - UPLOAD_CLEANUP_MAX_AGE_SECONDS
+            for path in UPLOAD_FOLDER.glob("*"):
+                if path.is_file() and path.stat().st_mtime < cutoff:
+                    path.unlink(missing_ok=True)
+                    logger.info("Cleaned old upload path=%s", path)
+        except Exception:
+            logger.warning("Upload cleanup task failed", exc_info=True)
+        await asyncio.sleep(300)
     memory_snapshot("startup_end")
 
 
@@ -430,7 +449,11 @@ async def predict_crop(
 
     try:
         logger.info("Prediction request crop=%s user=%s file_path=%s filename=%s", crop, user.get("email"), file_path, file.filename)
-        result = predict_image(file_path, crop)
+        async with prediction_semaphore:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(predict_image, file_path, crop),
+                timeout=PREDICTION_TIMEOUT_SECONDS,
+            )
 
         if "error" in result:
             logger.error("Prediction returned error crop=%s result=%s", crop, result)
@@ -491,6 +514,15 @@ async def predict_crop(
         raise HTTPException(
             status_code=503,
             detail="Database is not reachable. Check the backend MONGO_URL and MongoDB network access."
+        )
+    except asyncio.TimeoutError:
+        logger.exception("Prediction timed out crop=%s user=%s file_path=%s", crop, user.get("email"), file_path)
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "error": "Prediction timed out",
+                "message": "The AI scan took too long. Please retry with a clearer compressed image.",
+            },
         )
     except Exception as e:
         logger.exception("Prediction failed crop=%s user=%s file_path=%s", crop, user.get("email"), file_path)

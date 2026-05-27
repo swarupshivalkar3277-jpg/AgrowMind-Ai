@@ -24,7 +24,7 @@ export default function Cart() {
           <div className="cartItemsPanel">
             {cart.items.map((item) => (
               <article className="premiumCartItem" key={item.product.id}>
-                <img alt={item.product.name} src={item.product.image} />
+                <img alt={item.product.name} loading="lazy" src={item.product.image} />
                 <div className="cartItemInfo">
                   <span>{item.product.category}</span>
                   <strong>{item.product.name}</strong>

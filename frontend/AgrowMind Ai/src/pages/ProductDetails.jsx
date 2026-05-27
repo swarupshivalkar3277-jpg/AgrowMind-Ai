@@ -5,6 +5,7 @@ import { BadgeCheck, ChevronLeft, Heart, MapPin, PackageCheck, ShieldCheck, Shop
 import toast from "react-hot-toast";
 
 import PublicNav from "../components/PublicNav";
+import MobileBottomNavbar from "../components/MobileBottomNavbar";
 import { PriceBlock, RatingBadge, StoreBadge, TrustStrip } from "../components/MarketplaceUI";
 import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
@@ -75,7 +76,7 @@ export default function ProductDetails() {
             <div className="galleryRail">
               {gallery.map((item) => (
                 <button className={selectedImage === item ? "active" : ""} key={item} onClick={() => setSelectedImage(item)} type="button">
-                  <img alt={product.name} src={item} />
+                  <img alt={product.name} loading="lazy" src={item} />
                 </button>
               ))}
             </div>
@@ -130,6 +131,7 @@ export default function ProductDetails() {
         <button disabled={product.stock <= 0} onClick={() => addAndMaybeCheckout(false)} type="button"><ShoppingCart size={18} /> Add</button>
         <button disabled={product.stock <= 0} onClick={() => addAndMaybeCheckout(true)} type="button">Buy Now</button>
       </div>
+      <MobileBottomNavbar />
     </main>
   );
 }

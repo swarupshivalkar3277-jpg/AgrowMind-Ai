@@ -47,7 +47,7 @@ export default function ProductCard({ product }) {
           {Number(product.rating || 0) >= 4.5 && <span>Bestseller</span>}
           {product.stock > 0 && product.stock <= 5 && <span>Low stock</span>}
         </div>
-        <img alt={product.name} src={product.image || "https://images.unsplash.com/photo-1464226184884-fa280b87c399?auto=format&fit=crop&w=900&q=80"} />
+        <img alt={product.name} loading="lazy" src={product.image || "https://images.unsplash.com/photo-1464226184884-fa280b87c399?auto=format&fit=crop&w=900&q=80"} />
       </Link>
       <div className="productCardBody">
         <div>

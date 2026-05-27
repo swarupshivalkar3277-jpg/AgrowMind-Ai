@@ -57,7 +57,7 @@ const banners = [
   },
 ];
 
-export function MarketplaceHeader({ cartCount = 0, query, onQueryChange }) {
+export function MarketplaceHeader({ cartCount = 0, listening = false, onVoice, query, onQueryChange }) {
   const [focused, setFocused] = useState(false);
   return (
     <header className="shopHeader">
@@ -75,7 +75,7 @@ export function MarketplaceHeader({ cartCount = 0, query, onQueryChange }) {
           placeholder="Search seeds, fertilizers, tools"
           value={query || ""}
         />
-        <button aria-label="Voice search" type="button"><Mic size={18} /></button>
+        <button aria-label="Voice search" className={listening ? "listening" : ""} onClick={onVoice} type="button"><Mic size={18} /></button>
       </label>
       <nav className="shopHeaderActions" aria-label="Marketplace shortcuts">
         <button aria-label="Notifications" type="button"><Bell size={19} /></button>

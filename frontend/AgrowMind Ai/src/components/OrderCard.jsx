@@ -15,7 +15,7 @@ export default function OrderCard({ order, onCancel, onInvoice, onRefund }) {
   return (
     <article className="orderCard premiumOrderCard">
       <div className="orderProductThumb">
-        {product.image ? <img alt={product.name} src={product.image} /> : <Truck size={28} />}
+        {product.image ? <img alt={product.name} loading="lazy" src={product.image} /> : <Truck size={28} />}
       </div>
       <div className="orderMain">
         <div className="orderTopLine">

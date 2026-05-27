@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { BadgeCheck, ChevronDown, Flame, PackageCheck, Search, ShieldCheck, Truck } from "lucide-react";
 
 import EmptyState from "../components/EmptyState";
+import MobileBottomNavbar from "../components/MobileBottomNavbar";
 import ProductCard from "../components/ProductCard";
 import PublicNav from "../components/PublicNav";
 import {
@@ -16,6 +17,7 @@ import {
   SkeletonLoader,
 } from "../components/MarketplaceUI";
 import { useCart } from "../context/CartContext";
+import { useVoiceInput } from "../hooks/useVoiceInput";
 import { getProducts } from "../services/authService";
 
 const crops = ["tomato", "mango", "coconut"];
@@ -30,6 +32,7 @@ export default function Marketplace() {
   const [search, setSearch] = useState(params.get("search") || "");
   const [sort, setSort] = useState("featured");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [visibleLimit, setVisibleLimit] = useState(24);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [recentlyViewed, setRecentlyViewed] = useState([]);
   const [filters, setFilters] = useState({ maxPrice: "", rating: "", brand: "", availability: "" });
@@ -38,6 +41,7 @@ export default function Marketplace() {
   const disease = params.get("disease") || "";
 
   const debouncedSearch = useMemo(() => search.trim(), [search]);
+  const voice = useVoiceInput({ onResult: setSearch });
   const query = useMemo(() => ({ search: debouncedSearch, category, crop, disease }), [debouncedSearch, category, crop, disease]);
 
   useEffect(() => {
@@ -91,11 +95,17 @@ export default function Marketplace() {
     return next;
   }, [filters, products, sort]);
 
+  const renderedProducts = visibleProducts.slice(0, visibleLimit);
+
+  useEffect(() => {
+    setVisibleLimit(24);
+  }, [query, filters, sort]);
+
   return (
     <main className="publicPage shopPage">
       <PublicNav />
       <div className="shopShell">
-        <MarketplaceHeader cartCount={cart.count} onQueryChange={setSearch} query={search} />
+        <MarketplaceHeader cartCount={cart.count} listening={voice.listening} onQueryChange={setSearch} onVoice={voice.start} query={search} />
         <div className="marketplaceLayout">
           <aside className="marketSidebar" aria-label="Marketplace filters and trust signals">
             <section className="sidebarBlock marketplaceTrust">
@@ -163,9 +173,10 @@ export default function Marketplace() {
               <AnimatePresence mode="popLayout">
                 <motion.div className="productGrid" layout>
                   {loading && <SkeletonLoader count={8} />}
-                  {!loading && visibleProducts.map((product) => <ProductCard key={product.id} product={product} />)}
-                </motion.div>
-              </AnimatePresence>
+              {!loading && renderedProducts.map((product) => <ProductCard key={product.id} product={product} />)}
+            </motion.div>
+          </AnimatePresence>
+          {!loading && visibleLimit < visibleProducts.length && <button className="secondaryButton loadMoreButton" onClick={() => setVisibleLimit((value) => value + 24)} type="button">Load more products</button>}
               {!loading && visibleProducts.length === 0 && (
                 <EmptyState
                   icon={ShieldCheck}
@@ -180,7 +191,7 @@ export default function Marketplace() {
                 <div className="recentRail">
                   {recentlyViewed.map((product) => (
                     <Link className="miniProduct" key={product.id} to={`/marketplace/product/${product.id}`}>
-                      <img alt={product.name} src={product.image} />
+                  <img alt={product.name} loading="lazy" src={product.image} />
                       <span>{product.category}</span>
                       <strong>{product.name}</strong>
                       <small>Rs. {product.price}</small>
@@ -196,6 +207,7 @@ export default function Marketplace() {
         </div>
       </div>
       <FilterDrawer brands={brands} filters={filters} onChange={updateDrawerFilter} onClose={() => setDrawerOpen(false)} open={drawerOpen} />
+      <MobileBottomNavbar />
     </main>
   );
 }

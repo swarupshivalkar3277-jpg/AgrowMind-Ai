@@ -18,8 +18,8 @@ export default function UploadBox({ crop, crops, error, file, loading, onCrop, o
       </label>
       <label className={`dropZone ${previewUrl ? "hasPreview" : ""}`}>
         {previewUrl ? <img alt="Leaf preview" src={previewUrl} /> : <ImagePlus size={34} />}
-        <input accept="image/*" onChange={onFile} type="file" />
-        <span>{file?.name || "Drop leaf image or tap to upload"}</span>
+        <input accept="image/*" capture="environment" onChange={onFile} type="file" />
+        <span>{file ? `${file.name} (${Math.round(file.size / 1024)}KB)` : "Drop leaf image or tap to upload"}</span>
       </label>
       {error && <div className="alert">{error}</div>}
       <button className="primaryButton" disabled={loading} type="submit">

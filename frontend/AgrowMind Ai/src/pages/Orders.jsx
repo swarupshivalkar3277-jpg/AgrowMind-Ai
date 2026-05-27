@@ -10,11 +10,16 @@ import { downloadPredictionReport } from "../utils/reportPdf";
 export default function Orders() {
   const [orders, setOrders] = useState([]);
   const [status, setStatus] = useState("all");
+  const [loading, setLoading] = useState(true);
   const [params] = useSearchParams();
 
   async function refresh() {
-    const { data } = await getOrders();
-    setOrders(data.items || []);
+    try {
+      const { data } = await getOrders();
+      setOrders(data.items || []);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -65,7 +70,8 @@ export default function Orders() {
           </section>
         )}
         <div className="orderList">
-          {filtered.map((order) => (
+          {loading && Array.from({ length: 3 }).map((_, index) => <div className="orderSkeleton" key={index} />)}
+          {!loading && filtered.map((order) => (
             <OrderCard
               key={order.id}
               onCancel={handleCancel}
@@ -74,7 +80,7 @@ export default function Orders() {
               order={order}
             />
           ))}
-          {filtered.length === 0 && (
+          {!loading && filtered.length === 0 && (
             <EmptyState
               action={<Link className="primaryButton" to="/marketplace">Browse Marketplace</Link>}
               icon={ShoppingBag}
