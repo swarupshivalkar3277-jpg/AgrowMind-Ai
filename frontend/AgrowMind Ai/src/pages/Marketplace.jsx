@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Flame, Search, ShieldCheck } from "lucide-react";
+import { BadgeCheck, ChevronDown, Flame, PackageCheck, Search, ShieldCheck, Truck } from "lucide-react";
 
 import EmptyState from "../components/EmptyState";
 import ProductCard from "../components/ProductCard";
@@ -14,7 +14,6 @@ import {
   ListingToolbar,
   MarketplaceHeader,
   SkeletonLoader,
-  TrustStrip,
 } from "../components/MarketplaceUI";
 import { useCart } from "../context/CartContext";
 import { getProducts } from "../services/authService";
@@ -31,6 +30,7 @@ export default function Marketplace() {
   const [search, setSearch] = useState(params.get("search") || "");
   const [sort, setSort] = useState("featured");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [categoryOpen, setCategoryOpen] = useState(false);
   const [recentlyViewed, setRecentlyViewed] = useState([]);
   const [filters, setFilters] = useState({ maxPrice: "", rating: "", brand: "", availability: "" });
   const category = params.get("category") || "";
@@ -67,6 +67,11 @@ export default function Marketplace() {
     setParams(next);
   }
 
+  function selectCategory(value) {
+    updateFilter("category", value);
+    setCategoryOpen(false);
+  }
+
   function updateDrawerFilter(key, value) {
     setFilters((current) => ({ ...current, [key]: value }));
   }
@@ -91,78 +96,104 @@ export default function Marketplace() {
       <PublicNav />
       <div className="shopShell">
         <MarketplaceHeader cartCount={cart.count} onQueryChange={setSearch} query={search} />
-        <BannerCarousel />
-        <TrustStrip />
-        <section className="shopSection">
-          <div className="shopSectionHead">
-            <div><span>Shop by category</span><h2>Everything your farm needs</h2></div>
-            <Link to="/marketplace">View all</Link>
+        <div className="marketplaceLayout">
+          <aside className="marketSidebar" aria-label="Marketplace filters and trust signals">
+            <section className="sidebarBlock marketplaceTrust">
+              <span><ShieldCheck size={17} /> Secure payments</span>
+              <span><BadgeCheck size={17} /> Verified sellers</span>
+              <span><Truck size={17} /> Order tracking</span>
+              <span><PackageCheck size={17} /> Genuine products</span>
+            </section>
+            <section className="sidebarBlock">
+              <button className="categoryDropButton" onClick={() => setCategoryOpen((current) => !current)} type="button">
+                <span>Shop by category</span>
+                <ChevronDown className={categoryOpen ? "open" : ""} size={19} />
+              </button>
+              <AnimatePresence initial={false}>
+                {categoryOpen && (
+                  <motion.div
+                    animate={{ height: "auto", opacity: 1 }}
+                    className="sidebarCategoryList"
+                    exit={{ height: 0, opacity: 0 }}
+                    initial={{ height: 0, opacity: 0 }}
+                  >
+                    <CategoryScroller active={category} onSelect={selectCategory} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              <Link className="sidebarTextLink" to="/marketplace">View all categories</Link>
+            </section>
+            <section className="sidebarBlock">
+              <label className="sidebarSelect">
+                <span>Crop</span>
+                <select onChange={(event) => updateFilter("crop", event.target.value)} value={crop}>
+                  <option value="">All crops</option>
+                  {crops.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </label>
+            </section>
+            <section className="sidebarBlock instantSearch">
+              <Search size={18} />
+              <div>
+                <strong>Trending searches</strong>
+                <div>{trending.map((item) => <button key={item} onClick={() => setSearch(item)} type="button">{item}</button>)}</div>
+              </div>
+            </section>
+          </aside>
+          <div className="marketMain">
+            <BannerCarousel />
+            <section className="shopSection flashDeals">
+              <div className="shopSectionHead">
+                <div><span><Flame size={16} /> Flash deals</span><h2>Fast-moving farm inputs</h2></div>
+                <DealsTimer />
+              </div>
+              <div className="dealRail">
+                {(visibleProducts.length ? visibleProducts : products).slice(0, 6).map((product) => <ProductCard key={product.id} product={product} />)}
+                {loading && <SkeletonLoader count={4} />}
+              </div>
+            </section>
+            <section className="shopSection productListing">
+              <div className="shopSectionHead">
+                <div>
+                  <span>{disease ? `Matched to ${disease.replaceAll("_", " ")}` : "Recommended products"}</span>
+                  <h2>Marketplace picks for you</h2>
+                </div>
+                <ListingToolbar onFilter={() => setDrawerOpen(true)} onSort={setSort} sort={sort} />
+              </div>
+              <AnimatePresence mode="popLayout">
+                <motion.div className="productGrid" layout>
+                  {loading && <SkeletonLoader count={8} />}
+                  {!loading && visibleProducts.map((product) => <ProductCard key={product.id} product={product} />)}
+                </motion.div>
+              </AnimatePresence>
+              {!loading && visibleProducts.length === 0 && (
+                <EmptyState
+                  icon={ShieldCheck}
+                  title="No matching farm inputs"
+                  text="Try a different crop, category, price range, or disease search."
+                />
+              )}
+            </section>
+            {recentlyViewed.length > 0 && (
+              <section className="shopSection">
+                <div className="shopSectionHead"><div><span>Recently viewed</span><h2>Continue comparing</h2></div></div>
+                <div className="recentRail">
+                  {recentlyViewed.map((product) => (
+                    <Link className="miniProduct" key={product.id} to={`/marketplace/product/${product.id}`}>
+                      <img alt={product.name} src={product.image} />
+                      <span>{product.category}</span>
+                      <strong>{product.name}</strong>
+                      <small>Rs. {product.price}</small>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            )}
+            <section className="shopSection brandShowcase">
+              {brands.map((brand) => <span key={brand}>{brand}</span>)}
+            </section>
           </div>
-          <CategoryScroller active={category} onSelect={(value) => updateFilter("category", value)} />
-        </section>
-        <section className="discoveryPanel">
-          <div className="instantSearch">
-            <Search size={18} />
-            <div>
-              <strong>Trending searches</strong>
-              <div>{trending.map((item) => <button key={item} onClick={() => setSearch(item)} type="button">{item}</button>)}</div>
-            </div>
-          </div>
-          <select onChange={(event) => updateFilter("crop", event.target.value)} value={crop}>
-            <option value="">All crops</option>
-            {crops.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
-        </section>
-        <section className="shopSection flashDeals">
-          <div className="shopSectionHead">
-            <div><span><Flame size={16} /> Flash deals</span><h2>Fast-moving farm inputs</h2></div>
-            <DealsTimer />
-          </div>
-          <div className="dealRail">
-            {(visibleProducts.length ? visibleProducts : products).slice(0, 6).map((product) => <ProductCard key={product.id} product={product} />)}
-            {loading && <SkeletonLoader count={4} />}
-          </div>
-        </section>
-        <section className="shopSection productListing">
-          <div className="shopSectionHead">
-            <div>
-              <span>{disease ? `Matched to ${disease.replaceAll("_", " ")}` : "Recommended products"}</span>
-              <h2>Marketplace picks for you</h2>
-            </div>
-            <ListingToolbar onFilter={() => setDrawerOpen(true)} onSort={setSort} sort={sort} />
-          </div>
-          <AnimatePresence mode="popLayout">
-            <motion.div className="productGrid" layout>
-              {loading && <SkeletonLoader count={8} />}
-              {!loading && visibleProducts.map((product) => <ProductCard key={product.id} product={product} />)}
-            </motion.div>
-          </AnimatePresence>
-          {!loading && visibleProducts.length === 0 && (
-            <EmptyState
-              icon={ShieldCheck}
-              title="No matching farm inputs"
-              text="Try a different crop, category, price range, or disease search."
-            />
-          )}
-        </section>
-        {recentlyViewed.length > 0 && (
-          <section className="shopSection">
-            <div className="shopSectionHead"><div><span>Recently viewed</span><h2>Continue comparing</h2></div></div>
-            <div className="recentRail">
-              {recentlyViewed.map((product) => (
-                <Link className="miniProduct" key={product.id} to={`/marketplace/product/${product.id}`}>
-                  <img alt={product.name} src={product.image} />
-                  <span>{product.category}</span>
-                  <strong>{product.name}</strong>
-                  <small>Rs. {product.price}</small>
-                </Link>
-              ))}
-            </div>
-          </section>
-        )}
-        <section className="shopSection brandShowcase">
-          {brands.map((brand) => <span key={brand}>{brand}</span>)}
-        </section>
+        </div>
       </div>
       <FilterDrawer brands={brands} filters={filters} onChange={updateDrawerFilter} onClose={() => setDrawerOpen(false)} open={drawerOpen} />
     </main>

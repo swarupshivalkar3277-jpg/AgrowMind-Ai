@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import gc
 import logging
+import os
 from threading import Lock
 
 from rag.config import EMBEDDING_MODEL_NAME
 
 logger = logging.getLogger("agromind.rag.embeddings")
+UNLOAD_EMBEDDER_AFTER_QUERY = os.getenv("RAG_UNLOAD_EMBEDDER_AFTER_QUERY", "true").lower() in {"1", "true", "yes", "on"}
 
 
 class SentenceTransformerEmbedder:
@@ -39,7 +42,21 @@ class SentenceTransformerEmbedder:
         embeddings = self.model.encode(documents, normalize_embeddings=True, batch_size=32)
         return [embedding.tolist() for embedding in embeddings]
 
+    def unload(self, reason: str = "cleanup") -> None:
+        if self._model is None:
+            return
+        try:
+            del self._model
+        finally:
+            self._model = None
+            gc.collect()
+            logger.info("Unloaded RAG embedding model reason=%s", reason)
+
 
 def get_embedder() -> SentenceTransformerEmbedder:
     return SentenceTransformerEmbedder()
 
+
+def cleanup_embedder(reason: str = "cleanup") -> None:
+    if UNLOAD_EMBEDDER_AFTER_QUERY and SentenceTransformerEmbedder._instance is not None:
+        SentenceTransformerEmbedder._instance.unload(reason=reason)

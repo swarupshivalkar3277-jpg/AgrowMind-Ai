@@ -184,6 +184,134 @@
   font-weight: 800;
 }
 
+.marketplaceLayout {
+  display: grid;
+  grid-template-columns: 286px minmax(0, 1fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.marketMain {
+  min-width: 0;
+  display: grid;
+  gap: 20px;
+}
+
+.marketSidebar {
+  position: sticky;
+  top: 92px;
+  display: grid;
+  gap: 12px;
+}
+
+.sidebarBlock {
+  overflow: hidden;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .06);
+}
+
+.marketplaceTrust {
+  grid-template-columns: 1fr;
+}
+
+.marketplaceTrust span {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  color: #1e293b;
+  background: #f8fafc;
+  font-size: .9rem;
+  font-weight: 800;
+}
+
+.marketplaceTrust span:nth-child(1) { background: #ecfdf5; color: #166534; }
+.marketplaceTrust span:nth-child(2) { background: #eff6ff; color: #1d4ed8; }
+.marketplaceTrust span:nth-child(3) { background: #fff7ed; color: #c2410c; }
+.marketplaceTrust span:nth-child(4) { background: #f8fafc; color: #334155; }
+
+.categoryDropButton {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px;
+  background: transparent;
+  color: #0f172a;
+  font-weight: 900;
+  text-align: left;
+}
+
+.categoryDropButton svg {
+  transition: transform .2s ease;
+}
+
+.categoryDropButton svg.open {
+  transform: rotate(180deg);
+}
+
+.sidebarCategoryList {
+  overflow: hidden;
+}
+
+.marketSidebar .categoryScroller {
+  grid-auto-flow: row;
+  grid-auto-columns: unset;
+  grid-template-columns: 1fr;
+  overflow: visible;
+  padding-bottom: 0;
+  scroll-snap-type: none;
+}
+
+.marketSidebar .categoryScroller button {
+  min-height: 48px;
+  grid-template-columns: 38px 1fr;
+  justify-items: start;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 12px;
+}
+
+.marketSidebar .categoryScroller button span {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.marketSidebar .categoryScroller button strong {
+  font-size: .92rem;
+}
+
+.sidebarTextLink {
+  color: #16a34a;
+  font-size: .88rem;
+  font-weight: 800;
+}
+
+.sidebarSelect {
+  display: grid;
+  gap: 8px;
+}
+
+.sidebarSelect span {
+  color: #475569;
+  font-size: .78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.sidebarSelect select {
+  width: 100%;
+}
+
 .bannerCarousel {
   position: relative;
   min-height: 340px;
@@ -1054,6 +1182,20 @@
   .trustStrip, .checkoutSteps, .authIllustration {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .marketplaceLayout {
+    grid-template-columns: 1fr;
+  }
+  .marketSidebar {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .marketSidebar .instantSearch,
+  .marketSidebar .marketplaceTrust {
+    grid-column: 1 / -1;
+  }
+  .marketplaceTrust {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
   .premiumProductDetail, .premiumCartLayout, .premiumCheckout, .marketAuthShell {
     grid-template-columns: 1fr;
   }
@@ -1079,6 +1221,37 @@
   .shopSection, .discoveryPanel {
     border-radius: 16px;
     padding: 12px;
+  }
+  .marketplaceLayout {
+    gap: 12px;
+  }
+  .marketSidebar {
+    gap: 10px;
+    grid-template-columns: 1fr;
+  }
+  .sidebarBlock {
+    padding: 12px;
+    border-radius: 14px;
+  }
+  .marketplaceTrust {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .marketplaceTrust span {
+    min-height: 40px;
+    justify-content: flex-start;
+    font-size: .78rem;
+  }
+  .marketSidebar .categoryScroller {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .marketSidebar .categoryScroller button {
+    min-height: 44px;
+    grid-template-columns: 30px 1fr;
+    gap: 8px;
+  }
+  .marketSidebar .categoryScroller button span {
+    width: 28px;
+    height: 28px;
   }
   .productGrid {
     grid-template-columns: 1fr 1fr;

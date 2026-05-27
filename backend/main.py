@@ -44,6 +44,7 @@ from ai.predict import (
     model_status,
     model_loaded_status,
     ensure_configured_models,
+    memory_snapshot,
 )
 from ai.recommendations import enrich_prediction
 
@@ -94,6 +95,7 @@ app = FastAPI(
 async def startup_event():
     startup_started_at = time.perf_counter()
     logger.info("startup begin")
+    memory_snapshot("startup_begin")
     logger.info("Starting AgroMind AI FastAPI backend")
     logger.info("PORT=%s", os.getenv("PORT", "8000"))
     logger.info("Allowed CORS origins=%s", ALLOWED_ORIGINS)
@@ -114,12 +116,14 @@ async def startup_event():
 
     try:
         logger.info("Model startup artifact status=%s", ensure_configured_models())
+        memory_snapshot("startup_after_model_artifact_check")
     except Exception as e:
         logger.exception("Model startup warning: %s", str(e))
 
     total_seconds = time.perf_counter() - startup_started_at
     logger.info("startup end")
     logger.info("total startup seconds=%.3f", total_seconds)
+    memory_snapshot("startup_end")
 
 
 @app.options("/{full_path:path}", include_in_schema=False)

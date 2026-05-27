@@ -13,6 +13,12 @@ import zipfile
 from collections import OrderedDict
 from pathlib import Path
 
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+os.environ.setdefault("TF_INTER_OP_THREADS", "1")
+os.environ.setdefault("TF_INTRA_OP_THREADS", "1")
+
 import numpy as np
 import psutil
 from PIL import Image
@@ -22,9 +28,6 @@ from ai.recommendations import recommendation_for, validate_recommendation_cover
 
 tf = None
 logger = logging.getLogger("agromind.ai.predict")
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
-os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 BASE_DIR = Path(__file__).resolve().parents[1]
 PROJECT_DIR = BASE_DIR.parent
 AI_DIR = Path(__file__).resolve().parent
@@ -47,6 +50,7 @@ loaded_models = OrderedDict()
 model_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
 MIN_MODEL_BYTES = 1024
 MAX_LOADED_MODELS = max(1, int(os.getenv("MAX_LOADED_MODELS", "1")))
+UNLOAD_MODEL_AFTER_PREDICTION = os.getenv("UNLOAD_MODEL_AFTER_PREDICTION", "true").lower() in {"1", "true", "yes", "on"}
 
 
 def memory_snapshot(label: str, **extra) -> dict:
@@ -84,15 +88,47 @@ def get_tensorflow():
     return tf
 
 
+def clear_tensorflow_session() -> None:
+    if tf is None:
+        return
+    try:
+        tf.keras.backend.clear_session()
+    except Exception:
+        logger.debug("TensorFlow session cleanup failed", exc_info=True)
+
+
+def unload_model(crop: str, reason: str = "manual") -> None:
+    removed = loaded_models.pop(crop, None)
+    if not removed:
+        return
+    try:
+        del removed["model"]
+    except Exception:
+        logger.debug("TensorFlow model reference cleanup failed crop=%s", crop, exc_info=True)
+    clear_tensorflow_session()
+    gc.collect()
+    logger.info("Unloaded TensorFlow model crop=%s reason=%s", crop, reason)
+    memory_snapshot("after_model_unload", crop=crop, reason=reason)
+
+
+def unload_unused_models(active_crop: str | None = None, reason: str = "unused") -> None:
+    for crop in list(loaded_models.keys()):
+        if crop != active_crop:
+            unload_model(crop, reason=reason)
+
+
+def unload_all_models(reason: str = "cleanup") -> None:
+    for crop in list(loaded_models.keys()):
+        unload_model(crop, reason=reason)
+
+
 def evict_model_cache(except_crop: str | None = None) -> None:
     while len(loaded_models) > MAX_LOADED_MODELS:
         evict_crop = next((crop for crop in loaded_models if crop != except_crop), None)
         if evict_crop is None:
             return
-        loaded_models.pop(evict_crop, None)
-        logger.info("Evicted TensorFlow model from cache crop=%s max_loaded_models=%s", evict_crop, MAX_LOADED_MODELS)
-        gc.collect()
-        memory_snapshot("model_evicted", crop=evict_crop)
+        logger.info("Evicting TensorFlow model crop=%s max_loaded_models=%s", evict_crop, MAX_LOADED_MODELS)
+        unload_model(evict_crop, reason="cache_limit")
 
 
 def model_path_for_crop(crop: str) -> Path:
@@ -259,14 +295,11 @@ def ensure_configured_models() -> dict[str, str]:
 
     for crop in SUPPORTED_CROPS:
         try:
-            if not any(path.exists() for path in candidate_model_paths(crop)) and configured_model_url(crop):
-                download_model_if_configured(crop)
-
             model_path = next((path for path in candidate_model_paths(crop) if path.exists()), None)
             if not model_path:
-                results[crop] = "missing"
+                results[crop] = "missing:first_use_download_configured" if configured_model_url(crop) else "missing"
                 logger.warning(
-                    "Model startup warning crop=%s download_url=%s reason=model_not_found",
+                    "Model startup artifact check crop=%s download_url=%s reason=model_not_found lazy_download=true",
                     crop,
                     configured_model_url(crop),
                 )
@@ -491,6 +524,10 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
 
     output_size = int(model.output_shape[-1])
     if len(class_names) != output_size:
+        del model
+        clear_tensorflow_session()
+        gc.collect()
+        memory_snapshot("after_invalid_model_unload", crop=crop, reason="output_shape_mismatch")
         return None, None, {
             "error": "Model output size does not match class metadata",
             "crop": crop,
@@ -503,6 +540,10 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
 
     missing_recommendations = validate_recommendation_coverage(crop, class_names)
     if missing_recommendations:
+        del model
+        clear_tensorflow_session()
+        gc.collect()
+        memory_snapshot("after_invalid_model_unload", crop=crop, reason="missing_recommendations")
         return None, None, {
             "error": "Recommendation mappings missing",
             "crop": crop,
@@ -613,6 +654,7 @@ def confidence_notes(scores: np.ndarray) -> list[str]:
 
 def predict_image(image_path, model_type):
     started_at = time.perf_counter()
+    model_file = None
     try:
         logger.info("Prediction started crop=%s image_path=%s", model_type, image_path)
         memory_snapshot("before_prediction", crop=model_type)
@@ -620,6 +662,8 @@ def predict_image(image_path, model_type):
         if error:
             logger.error("Prediction cannot load model crop=%s error=%s", model_type, error)
             return error
+        unload_unused_models(active_crop=model_type, reason="before_prediction")
+        model_file = str(loaded_models[model_type]["path"])
 
         image_size = get_model_image_size(model, metadata)
         raw_batch = image_to_batch(image_path, image_size)
@@ -686,7 +730,7 @@ def predict_image(image_path, model_type):
                 class_names[index]: round(float(scores[index] * 100), 2)
                 for index in range(len(class_names))
             },
-            "model_file": str(loaded_models[model_type]["path"]),
+            "model_file": model_file,
         }
     except Exception as exc:
         logger.exception("Prediction exception crop=%s image_path=%s", model_type, image_path)
@@ -695,6 +739,13 @@ def predict_image(image_path, model_type):
             "exception_type": type(exc).__name__,
             "message": str(exc),
         }
+    finally:
+        if UNLOAD_MODEL_AFTER_PREDICTION:
+            unload_all_models(reason="after_prediction")
+        else:
+            unload_unused_models(active_crop=model_type, reason="after_prediction")
+            gc.collect()
+            memory_snapshot("after_prediction_gc", crop=model_type)
 
 
 def find_last_conv_layer(model: tf.keras.Model) -> str | None:
@@ -713,6 +764,7 @@ def create_gradcam(image_path, model_type, output_path=None):
         if error:
             logger.error("Grad-CAM cannot load model crop=%s error=%s", model_type, error)
             return error
+        unload_unused_models(active_crop=model_type, reason="before_gradcam")
 
         image_size = get_model_image_size(model, metadata)
         batch = apply_input_scale(image_to_batch(image_path, image_size), metadata)
@@ -762,3 +814,10 @@ def create_gradcam(image_path, model_type, output_path=None):
             "exception_type": type(exc).__name__,
             "message": str(exc),
         }
+    finally:
+        if UNLOAD_MODEL_AFTER_PREDICTION:
+            unload_all_models(reason="after_gradcam")
+        else:
+            unload_unused_models(active_crop=model_type, reason="after_gradcam")
+            gc.collect()
+            memory_snapshot("after_gradcam_gc", crop=model_type)

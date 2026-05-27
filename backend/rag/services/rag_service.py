@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+import gc
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
 from database.mongodb import db
+from rag.embeddings.embedder import cleanup_embedder
 from rag.retrieval.retriever import get_retriever
 from rag.services.llm_service import get_llm_service
 
@@ -43,22 +45,26 @@ class RAGService:
         if not clean_question:
             raise HTTPException(status_code=400, detail="Question is required")
 
-        chunks = self.retriever.retrieve(clean_question)
-        sources = unique_sources(chunks)
-        if not sources:
-            raise HTTPException(status_code=503, detail="RAG knowledge index is empty. Run rag/scripts/build_index.py first.")
+        try:
+            chunks = self.retriever.retrieve(clean_question)
+            sources = unique_sources(chunks)
+            if not sources:
+                raise HTTPException(status_code=503, detail="RAG knowledge index is empty. Run rag/scripts/build_index.py first.")
 
-        generated = await self.llm.generate_answer(clean_question, chunks)
-        answer = ensure_answer_citations(generated["answer"], sources)
-        response = {
-            "answer": answer,
-            "sources": sources,
-            "chunks": chunks,
-            "provider": generated["provider"],
-        }
-        if save_history and user:
-            await self.save_chat(user, clean_question, response)
-        return response
+            generated = await self.llm.generate_answer(clean_question, chunks)
+            answer = ensure_answer_citations(generated["answer"], sources)
+            response = {
+                "answer": answer,
+                "sources": sources,
+                "chunks": chunks,
+                "provider": generated["provider"],
+            }
+            if save_history and user:
+                await self.save_chat(user, clean_question, response)
+            return response
+        finally:
+            cleanup_embedder(reason="after_rag_query")
+            gc.collect()
 
     async def save_chat(self, user: dict, question: str, response: dict) -> None:
         try:
