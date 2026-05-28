@@ -43,10 +43,10 @@ def build_index(reset: bool = True) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build AgroMind RAG ChromaDB index")
-    parser.add_argument("--append", action="store_true", help="Append/upsert documents without deleting the collection first")
+    parser.add_argument("--reset", action="store_true", help="Delete and rebuild the collection before indexing")
     args = parser.parse_args()
 
-    summary = build_index(reset=not args.append)
+    summary = build_index(reset=args.reset)
     print("AgroMind RAG index build complete")
     print(f"Files processed: {summary['files_processed']}")
     print(f"Pages loaded: {summary['pages_loaded']}")
@@ -59,4 +59,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

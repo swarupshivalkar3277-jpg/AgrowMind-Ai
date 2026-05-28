@@ -50,7 +50,7 @@ from routes.marketplace import (
 )
 
 from rag.api.routes import router as rag_router
-from rag.services.rag_service import answer_disease_question, rag_health_status
+from rag.services.rag_service import answer_disease_question, rag_health_status, warmup_rag
 
 # =========================
 # AI
@@ -109,6 +109,11 @@ MODEL_PRELOAD_TIMEOUT_SECONDS = max(
 
 PRELOAD_MODELS_ON_STARTUP = os.getenv(
     "PRELOAD_MODELS_ON_STARTUP",
+    "true"
+).lower() in {"1", "true", "yes", "on"}
+
+PRELOAD_RAG_ON_STARTUP = os.getenv(
+    "PRELOAD_RAG_ON_STARTUP",
     "true"
 ).lower() in {"1", "true", "yes", "on"}
 
@@ -349,6 +354,19 @@ async def startup_event():
         logger.warning("Model startup preload disabled by PRELOAD_MODELS_ON_STARTUP=false")
 
     memory_snapshot("startup_after_model_preload")
+
+    if PRELOAD_RAG_ON_STARTUP:
+        try:
+            rag_warmup_result = await warmup_rag()
+            logger.info("RAG startup warmup complete result=%s", rag_warmup_result)
+        except asyncio.TimeoutError:
+            logger.warning("RAG startup warmup timed out; assistant will use fallback until ready")
+        except Exception:
+            logger.exception("RAG startup warmup failed; assistant fallback remains available")
+    else:
+        logger.warning("RAG startup warmup disabled by PRELOAD_RAG_ON_STARTUP=false")
+
+    memory_snapshot("startup_after_rag_warmup")
 
     total_seconds = time.perf_counter() - startup_started_at
 

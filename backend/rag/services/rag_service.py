@@ -1,26 +1,36 @@
 from __future__ import annotations
 
 import logging
-import gc
 import asyncio
 import os
 import time
+from threading import Lock
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
 from database.mongodb import db
-from rag.embeddings.embedder import cleanup_embedder
+from rag.embeddings.embedder import get_embedder
 from rag.retrieval.retriever import get_retriever
 from rag.services.llm_service import get_llm_service
-from rag.vectorstore.chroma_store import get_chroma_store
+from rag.vectorstore.chroma_store import chroma_status, get_chroma_store
 
 logger = logging.getLogger("agromind.rag.service")
-RAG_RETRIEVAL_TIMEOUT_SECONDS = max(3, int(os.getenv("RAG_RETRIEVAL_TIMEOUT_SECONDS", "12")))
-RAG_GENERATION_TIMEOUT_SECONDS = max(5, int(os.getenv("RAG_GENERATION_TIMEOUT_SECONDS", "35")))
-RAG_TOTAL_TIMEOUT_SECONDS = max(10, int(os.getenv("RAG_TOTAL_TIMEOUT_SECONDS", "45")))
+RAG_RETRIEVAL_TIMEOUT_SECONDS = max(3, int(os.getenv("RAG_RETRIEVAL_TIMEOUT_SECONDS", "5")))
+RAG_GENERATION_TIMEOUT_SECONDS = max(5, int(os.getenv("RAG_GENERATION_TIMEOUT_SECONDS", "10")))
+RAG_TOTAL_TIMEOUT_SECONDS = max(8, int(os.getenv("RAG_TOTAL_TIMEOUT_SECONDS", "15")))
 RAG_CONCURRENCY = max(1, int(os.getenv("RAG_CONCURRENCY", "1")))
+RAG_WARMUP_TIMEOUT_SECONDS = max(15, int(os.getenv("RAG_WARMUP_TIMEOUT_SECONDS", "120")))
 rag_semaphore = asyncio.Semaphore(RAG_CONCURRENCY)
+rag_startup_status: dict = {
+    "warmed": False,
+    "available": False,
+    "error": None,
+    "embedder_loaded": False,
+    "chroma_loaded": False,
+    "vector_documents": 0,
+    "warmup_duration_ms": None,
+}
 
 
 def unique_sources(chunks: list[dict]) -> list[dict]:
@@ -101,8 +111,6 @@ class RAGService:
                 provider="fallback_error",
             )
         finally:
-            cleanup_embedder(reason="after_rag_query")
-            gc.collect()
             logger.info("RAG request finished duration_ms=%.2f", (time.perf_counter() - started_at) * 1000)
 
     def fallback_response(self, answer: str, provider: str) -> dict:
@@ -131,14 +139,27 @@ class RAGService:
 
 
 def get_rag_service() -> RAGService:
-    return RAGService()
+    global _rag_service
+
+    if _rag_service is None:
+        with _rag_service_lock:
+            if _rag_service is None:
+                _rag_service = RAGService()
+    return _rag_service
 
 
 async def answer_question(question: str, user: dict | None = None, save_history: bool = True) -> dict:
-    return await asyncio.wait_for(
-        get_rag_service().answer_question(question, user=user, save_history=save_history),
-        timeout=RAG_TOTAL_TIMEOUT_SECONDS,
-    )
+    try:
+        return await asyncio.wait_for(
+            get_rag_service().answer_question(question, user=user, save_history=save_history),
+            timeout=RAG_TOTAL_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("RAG total timeout exceeded question_chars=%s", len(question or ""))
+        return get_rag_service().fallback_response(
+            "The assistant is warming up or the knowledge index is slow right now. Please try again shortly. For urgent crop care, remove badly affected leaves, avoid overwatering, and use only label-approved treatments.",
+            provider="fallback_total_timeout",
+        )
 
 
 async def answer_disease_question(crop: str, disease: str, user: dict | None = None) -> dict:
@@ -152,18 +173,24 @@ async def answer_disease_question(crop: str, disease: str, user: dict | None = N
 
 async def rag_health_status() -> dict:
     try:
-        count = await asyncio.wait_for(
-            asyncio.to_thread(get_chroma_store().count_documents),
+        status = await asyncio.wait_for(
+            asyncio.to_thread(chroma_status),
             timeout=RAG_RETRIEVAL_TIMEOUT_SECONDS,
         )
+        count = status["vector_documents"]
+        embedder = get_embedder()
         return {
             "success": True,
             "ready": count > 0,
             "vector_documents": count,
+            "embedder_loaded": embedder.is_loaded,
+            "chroma": status,
+            "startup": rag_startup_status,
             "timeouts": {
                 "retrieval_seconds": RAG_RETRIEVAL_TIMEOUT_SECONDS,
                 "generation_seconds": RAG_GENERATION_TIMEOUT_SECONDS,
                 "total_seconds": RAG_TOTAL_TIMEOUT_SECONDS,
+                "warmup_seconds": RAG_WARMUP_TIMEOUT_SECONDS,
             },
             "concurrency": RAG_CONCURRENCY,
         }
@@ -175,3 +202,54 @@ async def rag_health_status() -> dict:
             "error": type(exc).__name__,
             "message": str(exc),
         }
+
+
+def warmup_rag_sync() -> dict:
+    started_at = time.perf_counter()
+    status = {
+        "warmed": False,
+        "available": False,
+        "error": None,
+        "embedder_loaded": False,
+        "chroma_loaded": False,
+        "vector_documents": 0,
+        "warmup_duration_ms": None,
+    }
+    try:
+        store = get_chroma_store()
+        vector_documents = store.count_documents()
+        logger.info("RAG startup Chroma ready documents=%s", vector_documents)
+
+        embedder = get_embedder()
+        embedder.embed_text("AgroMind RAG warmup")
+        logger.info("RAG startup embedding model ready")
+
+        get_retriever()
+        status.update(
+            {
+                "warmed": True,
+                "available": vector_documents > 0,
+                "embedder_loaded": embedder.is_loaded,
+                "chroma_loaded": True,
+                "vector_documents": vector_documents,
+            }
+        )
+    except Exception as exc:
+        logger.exception("RAG startup warmup failed")
+        status.update({"error": f"{type(exc).__name__}: {exc}"})
+    finally:
+        status["warmup_duration_ms"] = round((time.perf_counter() - started_at) * 1000, 2)
+        rag_startup_status.update(status)
+        logger.info("RAG startup warmup finished status=%s", status)
+    return status
+
+
+async def warmup_rag() -> dict:
+    return await asyncio.wait_for(
+        asyncio.to_thread(warmup_rag_sync),
+        timeout=RAG_WARMUP_TIMEOUT_SECONDS,
+    )
+
+
+_rag_service: RAGService | None = None
+_rag_service_lock = Lock()

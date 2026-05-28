@@ -53,13 +53,17 @@ services:
       - key: RAG_CONCURRENCY
         value: "1"
       - key: RAG_TOTAL_TIMEOUT_SECONDS
-        value: "45"
+        value: "15"
       - key: RAG_RETRIEVAL_TIMEOUT_SECONDS
-        value: "12"
+        value: "5"
       - key: RAG_GENERATION_TIMEOUT_SECONDS
-        value: "30"
+        value: "10"
       - key: RAG_UNLOAD_EMBEDDER_AFTER_QUERY
         value: "false"
+      - key: PRELOAD_RAG_ON_STARTUP
+        value: "true"
+      - key: RAG_WARMUP_TIMEOUT_SECONDS
+        value: "120"
       - key: FRONTEND_URL
         value: https://agromindai.in
       - key: ALLOWED_ORIGINS

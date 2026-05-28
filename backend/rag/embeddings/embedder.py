@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import logging
 import os
+import time
 from threading import Lock
 
 from rag.config import EMBEDDING_MODEL_NAME
@@ -26,11 +27,23 @@ class SentenceTransformerEmbedder:
     @property
     def model(self):
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
+            with self._lock:
+                if self._model is None:
+                    from sentence_transformers import SentenceTransformer
 
-            logger.info("Loading RAG embedding model=%s", EMBEDDING_MODEL_NAME)
-            self._model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+                    started_at = time.perf_counter()
+                    logger.info("Loading RAG embedding model=%s", EMBEDDING_MODEL_NAME)
+                    self._model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+                    logger.info(
+                        "RAG embedding model loaded model=%s duration_ms=%.2f",
+                        EMBEDDING_MODEL_NAME,
+                        (time.perf_counter() - started_at) * 1000,
+                    )
         return self._model
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._model is not None
 
     def embed_text(self, text: str) -> list[float]:
         embedding = self.model.encode([text], normalize_embeddings=True)[0]
@@ -58,5 +71,5 @@ def get_embedder() -> SentenceTransformerEmbedder:
 
 
 def cleanup_embedder(reason: str = "cleanup") -> None:
-    if UNLOAD_EMBEDDER_AFTER_QUERY and SentenceTransformerEmbedder._instance is not None:
-        SentenceTransformerEmbedder._instance.unload(reason=reason)
+    if UNLOAD_EMBEDDER_AFTER_QUERY:
+        logger.warning("Ignoring RAG_UNLOAD_EMBEDDER_AFTER_QUERY=true; embedder stays cached reason=%s", reason)

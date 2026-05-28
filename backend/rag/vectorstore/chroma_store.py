@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from pathlib import Path
+from threading import Lock
 
 from rag.config import COLLECTION_NAME, VECTOR_DB_DIR
 
@@ -22,15 +24,30 @@ class ChromaStore:
         if self._client is None:
             import chromadb
 
+            started_at = time.perf_counter()
+            logger.info("Loading Chroma persistent client path=%s", self.persist_path)
             self._client = chromadb.PersistentClient(path=str(self.persist_path))
+            logger.info(
+                "Chroma persistent client loaded path=%s duration_ms=%.2f",
+                self.persist_path,
+                (time.perf_counter() - started_at) * 1000,
+            )
         return self._client
 
     @property
     def collection(self):
         if self._collection is None:
+            started_at = time.perf_counter()
             self._collection = self.client.get_or_create_collection(
                 name=self.collection_name,
                 metadata={"hnsw:space": "cosine"},
+            )
+            logger.info(
+                "Chroma collection loaded name=%s path=%s documents=%s duration_ms=%.2f",
+                self.collection_name,
+                self.persist_path,
+                self._collection.count(),
+                (time.perf_counter() - started_at) * 1000,
             )
         return self._collection
 
@@ -73,7 +90,13 @@ class ChromaStore:
         return len(documents)
 
     def search(self, query_embedding: list[float], top_k: int = 5) -> list[dict]:
+        started_at = time.perf_counter()
         if self.count_documents() == 0:
+            logger.warning(
+                "Chroma retrieval skipped empty collection=%s duration_ms=%.2f",
+                self.collection_name,
+                (time.perf_counter() - started_at) * 1000,
+            )
             return []
         results = self.collection.query(
             query_embeddings=[query_embedding],
@@ -97,6 +120,13 @@ class ChromaStore:
                     "score": similarity,
                 }
             )
+        logger.info(
+            "Chroma retrieval completed collection=%s requested_top_k=%s returned=%s duration_ms=%.2f",
+            self.collection_name,
+            top_k,
+            len(matches),
+            (time.perf_counter() - started_at) * 1000,
+        )
         return matches
 
     def delete_collection(self) -> None:
@@ -111,5 +141,26 @@ class ChromaStore:
 
 
 def get_chroma_store() -> ChromaStore:
-    return ChromaStore()
+    global _store
 
+    if _store is None:
+        with _store_lock:
+            if _store is None:
+                _store = ChromaStore()
+    return _store
+
+
+def chroma_status() -> dict:
+    store = get_chroma_store()
+    vector_documents = store.count_documents()
+    return {
+        "persist_path": str(store.persist_path),
+        "collection_name": store.collection_name,
+        "client_loaded": store._client is not None,
+        "collection_loaded": store._collection is not None,
+        "vector_documents": vector_documents,
+    }
+
+
+_store: ChromaStore | None = None
+_store_lock = Lock()
