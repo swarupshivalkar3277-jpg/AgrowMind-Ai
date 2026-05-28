@@ -13,7 +13,8 @@ const api = axios.create({
   withCredentials: false,
 });
 
-export const PREDICTION_TIMEOUT_MS = 180000;
+export const PREDICTION_TIMEOUT_MS = Number(import.meta.env.VITE_PREDICTION_TIMEOUT_MS || 240000);
+export const ASSISTANT_TIMEOUT_MS = Number(import.meta.env.VITE_ASSISTANT_TIMEOUT_MS || 90000);
 
 const GET_CACHE_TTL_MS = 60_000;
 const getCache = new Map();
@@ -43,6 +44,32 @@ function cachedGet(url, config = {}) {
     getCache.set(key, { createdAt: Date.now(), response });
     return response;
   });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function shouldRetryRequest(error) {
+  if (error?.code === "ECONNABORTED") return true;
+  if (!error?.response) return true;
+  return [502, 503, 504].includes(error.response.status);
+}
+
+async function requestWithRetry(requestFactory, { retries = 1, retryDelayMs = 1500 } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await requestFactory();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= retries || !shouldRetryRequest(error)) {
+        throw error;
+      }
+      await sleep(retryDelayMs * (attempt + 1));
+    }
+  }
+  throw lastError;
 }
 
 api.interceptors.request.use((config) => {
@@ -121,7 +148,20 @@ export function getHistory() {
 }
 
 export function askAssistant(payload) {
-  return api.post("/rag/query", payload);
+  return requestWithRetry(
+    () => api.post("/rag/query", payload, { timeout: ASSISTANT_TIMEOUT_MS }),
+    { retries: 1, retryDelayMs: 2000 }
+  );
+}
+
+export function predictCrop(crop, formData) {
+  return requestWithRetry(
+    () => api.post(`/predict/${crop}`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: PREDICTION_TIMEOUT_MS,
+    }),
+    { retries: 1, retryDelayMs: 2500 }
+  );
 }
 
 export function getProducts(params = {}) {

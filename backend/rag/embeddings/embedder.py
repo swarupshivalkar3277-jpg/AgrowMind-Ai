@@ -8,7 +8,7 @@ from threading import Lock
 from rag.config import EMBEDDING_MODEL_NAME
 
 logger = logging.getLogger("agromind.rag.embeddings")
-UNLOAD_EMBEDDER_AFTER_QUERY = os.getenv("RAG_UNLOAD_EMBEDDER_AFTER_QUERY", "true").lower() in {"1", "true", "yes", "on"}
+UNLOAD_EMBEDDER_AFTER_QUERY = os.getenv("RAG_UNLOAD_EMBEDDER_AFTER_QUERY", "false").lower() in {"1", "true", "yes", "on"}
 
 
 class SentenceTransformerEmbedder:

@@ -4,11 +4,8 @@ import json
 import logging
 import os
 import gc
-import shutil
 import threading
 import time
-import urllib.error
-import urllib.request
 import zipfile
 from collections import OrderedDict
 from pathlib import Path
@@ -38,9 +35,9 @@ MODEL_DIRS = [
     for path in os.getenv("MODEL_DIRS", "").split(os.pathsep)
     if path.strip()
 ] or [
+    BASE_DIR / "models",
     TRAINING_DIR,
     AI_DIR / "models",
-    BASE_DIR / "models",
     PROJECT_DIR,
 ]
 IMG_SIZE = 224
@@ -48,9 +45,13 @@ SUPPORTED_CROPS = ("tomato", "mango", "coconut")
 
 loaded_models = OrderedDict()
 model_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
+prediction_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
 MIN_MODEL_BYTES = 1024
-MAX_LOADED_MODELS = max(1, int(os.getenv("MAX_LOADED_MODELS", "1")))
-UNLOAD_MODEL_AFTER_PREDICTION = os.getenv("UNLOAD_MODEL_AFTER_PREDICTION", "true").lower() in {"1", "true", "yes", "on"}
+MAX_LOADED_MODELS = max(1, int(os.getenv("MAX_LOADED_MODELS", str(len(SUPPORTED_CROPS)))))
+UNLOAD_MODEL_AFTER_PREDICTION = os.getenv("UNLOAD_MODEL_AFTER_PREDICTION", "false").lower() in {"1", "true", "yes", "on"}
+model_load_timings: dict[str, float] = {}
+model_load_errors: dict[str, dict] = {}
+preload_completed_at: float | None = None
 
 
 def memory_snapshot(label: str, **extra) -> dict:
@@ -256,38 +257,12 @@ def model_artifact_error(crop: str, model_path: Path) -> dict | None:
 
 
 def download_model_if_configured(crop: str) -> Path | None:
-    url = configured_model_url(crop)
-    if not url:
-        return None
-
-    TRAINING_DIR.mkdir(parents=True, exist_ok=True)
-    destination = TRAINING_DIR / f"{crop}_model.keras"
-    temp_path = destination.with_suffix(".download")
-
-    try:
-        logger.info("Downloading model crop=%s download_url=%s", crop, url)
-        with urllib.request.urlopen(url, timeout=180) as response:
-            with temp_path.open("wb") as output:
-                shutil.copyfileobj(response, output)
-
-        logger.info(
-            "Downloaded model artifact crop=%s download_url=%s downloaded_file_size=%s",
-            crop,
-            url,
-            temp_path.stat().st_size if temp_path.exists() else None,
-        )
-        if temp_path.stat().st_size < MIN_MODEL_BYTES:
-            temp_path.unlink(missing_ok=True)
-            raise RuntimeError(f"Downloaded {crop} model is too small to be valid")
-
-        validate_downloaded_model_artifact(crop, temp_path)
-        temp_path.replace(destination)
-        logger.info("Downloaded %s model to %s size_bytes=%s", crop, destination, destination.stat().st_size)
-        return destination
-    except (urllib.error.URLError, OSError, RuntimeError) as exc:
-        temp_path.unlink(missing_ok=True)
-        logger.exception("Model download failed crop=%s url=%s", crop, url)
-        raise RuntimeError(f"Could not download {crop} model from {url}: {exc}") from exc
+    logger.warning(
+        "Runtime model download disabled crop=%s configured_url=%s",
+        crop,
+        configured_model_url(crop),
+    )
+    return None
 
 
 def ensure_configured_models() -> dict[str, str]:
@@ -297,9 +272,9 @@ def ensure_configured_models() -> dict[str, str]:
         try:
             model_path = next((path for path in candidate_model_paths(crop) if path.exists()), None)
             if not model_path:
-                results[crop] = "missing:first_use_download_configured" if configured_model_url(crop) else "missing"
+                results[crop] = "missing:runtime_download_disabled"
                 logger.warning(
-                    "Model startup artifact check crop=%s download_url=%s reason=model_not_found lazy_download=true",
+                    "Model startup artifact check crop=%s download_url=%s reason=model_not_found runtime_download=false",
                     crop,
                     configured_model_url(crop),
                 )
@@ -344,8 +319,16 @@ def ensure_configured_models() -> dict[str, str]:
 
 def model_loaded_status() -> dict[str, str]:
     return {
-        crop: "loaded" if crop in loaded_models else "not_loaded"
-        for crop in SUPPORTED_CROPS
+        "loaded_models": list(loaded_models.keys()),
+        "max_loaded_models": MAX_LOADED_MODELS,
+        "unload_after_prediction": UNLOAD_MODEL_AFTER_PREDICTION,
+        "preload_completed_at": preload_completed_at,
+        "load_timings_ms": model_load_timings,
+        "load_errors": model_load_errors,
+        "crops": {
+            crop: "loaded" if crop in loaded_models else "not_loaded"
+            for crop in SUPPORTED_CROPS
+        },
     }
 
 
@@ -379,6 +362,7 @@ def model_status() -> dict:
             "path": str(available_path) if available_path else None,
             "size_bytes": size_bytes,
             "download_url": configured_model_url(crop),
+            "runtime_download_enabled": False,
             "model_output_shape": output_shape_from_artifact(available_path) if available_path else None,
             "class_names_path": str(class_names_path(crop)),
             "metadata_class_count": len(class_metadata),
@@ -441,17 +425,13 @@ def load_crop_model(crop: str):
     model_path = model_path_for_crop(crop)
     logger.info("Resolving model crop=%s selected_path=%s", crop, model_path)
     if not model_path.exists():
-        download_model_if_configured(crop)
-        model_path = model_path_for_crop(crop)
-
-    if not model_path.exists():
         return None, None, {
             "error": f"{crop} model not found",
             "path": str(model_path),
             "candidates": [str(path) for path in candidate_model_paths(crop)],
             "hint": (
-                f"Add {crop}_model.keras to backend/training, commit it, "
-                f"or set {crop.upper()}_MODEL_URL / MODEL_BASE_URL on the deployed backend."
+                f"Add {crop}_model.keras to backend/models or backend/training and commit it. "
+                "Runtime model downloads are disabled in production."
             ),
         }
 
@@ -494,6 +474,7 @@ def load_crop_model(crop: str):
 
 
 def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, class_metadata_modified_at: float | None):
+    load_started_at = time.perf_counter()
     metadata = load_metadata(crop, model_path)
     try:
         class_names = load_class_names(crop)
@@ -512,7 +493,7 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
         model = get_tensorflow().keras.models.load_model(model_path, compile=False)
     except Exception as exc:
         logger.exception("TensorFlow model load failed crop=%s path=%s", crop, model_path)
-        return None, None, {
+        error = {
             "error": f"{crop} model could not be loaded",
             "path": str(model_path),
             "message": str(exc),
@@ -521,6 +502,8 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
                 "or set MODEL_DIRS to a directory that contains it."
             ),
         }
+        model_load_errors[crop] = error
+        return None, None, error
 
     output_size = int(model.output_shape[-1])
     if len(class_names) != output_size:
@@ -560,6 +543,8 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
     }
     loaded_models.move_to_end(crop)
     evict_model_cache(except_crop=crop)
+    model_load_timings[crop] = round((time.perf_counter() - load_started_at) * 1000, 2)
+    model_load_errors.pop(crop, None)
     logger.info(
         "TensorFlow model cached crop=%s path=%s input_shape=%s output_shape=%s",
         crop,
@@ -571,6 +556,58 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
 
     entry = loaded_models[crop]
     return entry["model"], entry["metadata"], None
+
+
+def preload_all_models(strict: bool = False) -> dict:
+    global preload_completed_at
+
+    started_at = time.perf_counter()
+    memory_snapshot("preload_models_begin")
+    results: dict[str, dict] = {}
+
+    for crop in SUPPORTED_CROPS:
+        crop_started_at = time.perf_counter()
+        model, metadata, error = load_crop_model(crop)
+        duration_ms = round((time.perf_counter() - crop_started_at) * 1000, 2)
+        if error:
+            model_load_errors[crop] = error
+            results[crop] = {"loaded": False, "duration_ms": duration_ms, "error": error}
+            if strict:
+                raise RuntimeError(f"{crop} model preload failed: {error}")
+            continue
+
+        results[crop] = {
+            "loaded": True,
+            "duration_ms": duration_ms,
+            "input_shape": str(getattr(model, "input_shape", None)),
+            "output_shape": str(getattr(model, "output_shape", None)),
+            "class_count": len(metadata.get("class_names") or []),
+        }
+
+    preload_completed_at = time.time()
+    total_ms = round((time.perf_counter() - started_at) * 1000, 2)
+    memory_snapshot("preload_models_complete", total_ms=total_ms)
+    return {"duration_ms": total_ms, "results": results, "loaded_models": list(loaded_models.keys())}
+
+
+def warm_prediction_pipeline() -> dict:
+    warmed: dict[str, dict] = {}
+    for crop, entry in list(loaded_models.items()):
+        try:
+            model = entry["model"]
+            metadata = entry["metadata"]
+            image_size = get_model_image_size(model, metadata)
+            batch = np.zeros((1, image_size[1], image_size[0], 3), dtype=np.float32)
+            batch = apply_input_scale(batch, metadata)
+            with prediction_locks[crop]:
+                started_at = time.perf_counter()
+                model.predict(batch, verbose=0)
+            warmed[crop] = {"ok": True, "duration_ms": round((time.perf_counter() - started_at) * 1000, 2)}
+        except Exception as exc:
+            logger.exception("Prediction warmup failed crop=%s", crop)
+            warmed[crop] = {"ok": False, "error": type(exc).__name__, "message": str(exc)}
+    memory_snapshot("prediction_warmup_complete")
+    return warmed
 
 
 def get_model_image_size(model, metadata: dict) -> tuple[int, int]:
@@ -662,7 +699,6 @@ def predict_image(image_path, model_type):
         if error:
             logger.error("Prediction cannot load model crop=%s error=%s", model_type, error)
             return error
-        unload_unused_models(active_crop=model_type, reason="before_prediction")
         model_file = str(loaded_models[model_type]["path"])
 
         image_size = get_model_image_size(model, metadata)
@@ -677,7 +713,8 @@ def predict_image(image_path, model_type):
             len(metadata.get("class_names") or []),
             getattr(model, "output_shape", None),
         )
-        raw_prediction = model.predict(batch, verbose=0)[0]
+        with prediction_locks[model_type]:
+            raw_prediction = model.predict(batch, verbose=0)[0]
         scores = normalize_scores(raw_prediction, float(metadata.get("temperature", 1.0)))
         try:
             class_names = class_names_for_scores(model_type, metadata, scores, model)
@@ -743,7 +780,7 @@ def predict_image(image_path, model_type):
         if UNLOAD_MODEL_AFTER_PREDICTION:
             unload_all_models(reason="after_prediction")
         else:
-            unload_unused_models(active_crop=model_type, reason="after_prediction")
+            evict_model_cache(except_crop=model_type)
             gc.collect()
             memory_snapshot("after_prediction_gc", crop=model_type)
 
@@ -764,7 +801,6 @@ def create_gradcam(image_path, model_type, output_path=None):
         if error:
             logger.error("Grad-CAM cannot load model crop=%s error=%s", model_type, error)
             return error
-        unload_unused_models(active_crop=model_type, reason="before_gradcam")
 
         image_size = get_model_image_size(model, metadata)
         batch = apply_input_scale(image_to_batch(image_path, image_size), metadata)
@@ -780,7 +816,7 @@ def create_gradcam(image_path, model_type, output_path=None):
             [model.get_layer(last_conv_layer_name).output, model.output],
         )
 
-        with tensorflow.GradientTape() as tape:
+        with prediction_locks[model_type], tensorflow.GradientTape() as tape:
             conv_outputs, predictions = grad_model(batch)
             predicted_index = tensorflow.argmax(predictions[0])
             class_score = predictions[:, predicted_index]

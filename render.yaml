@@ -3,15 +3,10 @@ services:
     name: agromind-ai-api
     runtime: python
     rootDir: backend
-    # Persistent disks require a paid Render web service.
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /health
-    disk:
-      name: rag-vector-db
-      mountPath: /opt/render/project/src/backend/vector_db
-      sizeGB: 1
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 20 --limit-concurrency 8
+    healthCheckPath: /ready
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
@@ -29,6 +24,42 @@ services:
         value: 1.1.1.1,8.8.8.8
       - key: ENVIRONMENT
         value: production
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: CUDA_VISIBLE_DEVICES
+        value: "-1"
+      - key: TF_CPP_MIN_LOG_LEVEL
+        value: "2"
+      - key: TF_ENABLE_ONEDNN_OPTS
+        value: "0"
+      - key: TF_INTER_OP_THREADS
+        value: "1"
+      - key: TF_INTRA_OP_THREADS
+        value: "1"
+      - key: PRELOAD_MODELS_ON_STARTUP
+        value: "true"
+      - key: REQUIRE_MODELS_ON_STARTUP
+        value: "true"
+      - key: MODEL_PRELOAD_TIMEOUT_SECONDS
+        value: "240"
+      - key: MAX_LOADED_MODELS
+        value: "3"
+      - key: UNLOAD_MODEL_AFTER_PREDICTION
+        value: "false"
+      - key: PREDICTION_CONCURRENCY
+        value: "1"
+      - key: PREDICTION_TIMEOUT_SECONDS
+        value: "150"
+      - key: RAG_CONCURRENCY
+        value: "1"
+      - key: RAG_TOTAL_TIMEOUT_SECONDS
+        value: "45"
+      - key: RAG_RETRIEVAL_TIMEOUT_SECONDS
+        value: "12"
+      - key: RAG_GENERATION_TIMEOUT_SECONDS
+        value: "30"
+      - key: RAG_UNLOAD_EMBEDDER_AFTER_QUERY
+        value: "false"
       - key: FRONTEND_URL
         value: https://agromindai.in
       - key: ALLOWED_ORIGINS
@@ -70,12 +101,4 @@ services:
       - key: RAG_EMBEDDING_MODEL
         value: all-MiniLM-L6-v2
       - key: MODEL_DIRS
-        sync: false
-      - key: MODEL_BASE_URL
-        sync: false
-      - key: TOMATO_MODEL_URL
-        sync: false
-      - key: MANGO_MODEL_URL
-        sync: false
-      - key: COCONUT_MODEL_URL
-        sync: false
+        value: models:training

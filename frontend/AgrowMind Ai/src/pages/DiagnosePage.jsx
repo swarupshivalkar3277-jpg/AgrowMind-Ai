@@ -6,7 +6,7 @@ import toast from "react-hot-toast";
 import PredictionResultCard from "../components/PredictionResultCard";
 import UploadBox from "../components/UploadBox";
 import { useAuth } from "../context/AuthContext";
-import api, { getHistory, PREDICTION_TIMEOUT_MS } from "../services/authService";
+import { getHistory, predictCrop } from "../services/authService";
 import { compressImage } from "../utils/imageCompression";
 import { downloadPredictionReport } from "../utils/reportPdf";
 
@@ -31,6 +31,8 @@ function normalizeError(error) {
   if (detail?.reason && detail?.reason !== detail?.error) return `${detail.error || "Prediction failed"}: ${detail.reason}`;
   if (detail?.error) return detail.error;
   if (Array.isArray(detail)) return detail.map((item) => item.msg).filter(Boolean).join(", ");
+  if (error?.code === "ECONNABORTED") return "The backend is still warming up or the AI model is busy. Please try again in a moment.";
+  if (!error?.response) return "The backend did not respond. This is usually a cold start or server timeout, not a browser CORS issue.";
   return error?.message || "Prediction failed";
 }
 
@@ -88,10 +90,7 @@ export default function DiagnosePage() {
     setError("");
 
     try {
-      const { data } = await api.post(`/predict/${crop}`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-        timeout: PREDICTION_TIMEOUT_MS,
-      });
+      const { data } = await predictCrop(crop, formData);
       setResult({ ...data, created_at: new Date().toISOString() });
       getHistory().catch(() => null);
       toast.success("Prediction completed");
@@ -142,7 +141,7 @@ export default function DiagnosePage() {
                 {predictionSteps.map((step, index) => <span className={index <= progressStep ? "active" : ""} key={step}>{step}</span>)}
               </div>
               <strong>{predictionSteps[progressStep]}...</strong>
-              <p>Optimized upload, lazy model loading, disease classification, and treatment generation are running.</p>
+              <p>Uploading, queueing, disease classification, and treatment generation are running.</p>
             </div>
           ) : (
             <PredictionResultCard

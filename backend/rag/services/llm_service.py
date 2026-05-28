@@ -10,6 +10,7 @@ from rag.config import GEMINI_MODEL, LLM_PROVIDER, OPENAI_MODEL, RAG_REQUIRE_LLM
 from rag.prompts.agriculture_prompt import build_agriculture_prompt
 
 logger = logging.getLogger("agromind.rag.llm")
+RAG_LLM_HTTP_TIMEOUT_SECONDS = max(5, int(os.getenv("RAG_LLM_HTTP_TIMEOUT_SECONDS", "30")))
 
 
 class LLMService:
@@ -48,7 +49,7 @@ class LLMService:
         }
         logger.info("Gemini request started model=%s prompt_chars=%s", GEMINI_MODEL, len(prompt))
         try:
-            async with httpx.AsyncClient(timeout=45) as client:
+            async with httpx.AsyncClient(timeout=RAG_LLM_HTTP_TIMEOUT_SECONDS) as client:
                 response = await client.post(url, params={"key": api_key}, json=payload)
         except httpx.RequestError as exc:
             logger.exception("Gemini request failed before response model=%s", GEMINI_MODEL)
@@ -78,7 +79,7 @@ class LLMService:
             "max_output_tokens": 1200,
         }
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        async with httpx.AsyncClient(timeout=45) as client:
+        async with httpx.AsyncClient(timeout=RAG_LLM_HTTP_TIMEOUT_SECONDS) as client:
             response = await client.post("https://api.openai.com/v1/responses", json=payload, headers=headers)
         if response.status_code >= 400:
             logger.error("OpenAI RAG request failed status=%s body=%s", response.status_code, response.text[:500])

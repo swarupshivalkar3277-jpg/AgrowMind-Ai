@@ -50,7 +50,7 @@ from routes.marketplace import (
 )
 
 from rag.api.routes import router as rag_router
-from rag.services.rag_service import answer_disease_question
+from rag.services.rag_service import answer_disease_question, rag_health_status
 
 # =========================
 # AI
@@ -58,7 +58,10 @@ from rag.services.rag_service import answer_disease_question
 from ai.detect import detect_objects
 
 from ai.predict import (
+    ensure_configured_models,
     predict_image,
+    preload_all_models,
+    warm_prediction_pipeline,
     model_status,
     model_loaded_status,
     memory_snapshot,
@@ -98,6 +101,21 @@ PREDICTION_TIMEOUT_SECONDS = max(
     30,
     int(os.getenv("PREDICTION_TIMEOUT_SECONDS", "150"))
 )
+
+MODEL_PRELOAD_TIMEOUT_SECONDS = max(
+    60,
+    int(os.getenv("MODEL_PRELOAD_TIMEOUT_SECONDS", "240"))
+)
+
+PRELOAD_MODELS_ON_STARTUP = os.getenv(
+    "PRELOAD_MODELS_ON_STARTUP",
+    "true"
+).lower() in {"1", "true", "yes", "on"}
+
+REQUIRE_MODELS_ON_STARTUP = os.getenv(
+    "REQUIRE_MODELS_ON_STARTUP",
+    "true" if os.getenv("ENVIRONMENT", os.getenv("ENV", "development")).lower() == "production" else "false"
+).lower() in {"1", "true", "yes", "on"}
 
 UPLOAD_CLEANUP_MAX_AGE_SECONDS = max(
     300,
@@ -298,9 +316,39 @@ async def startup_event():
             str(e)
         )
 
-    # IMPORTANT:
-    # DO NOT LOAD MODELS HERE
-    # MODELS SHOULD LOAD ONLY DURING PREDICTION
+    model_artifacts = ensure_configured_models()
+    logger.info("Model artifact startup status=%s", model_artifacts)
+
+    if PRELOAD_MODELS_ON_STARTUP:
+        try:
+            preload_result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    preload_all_models,
+                    REQUIRE_MODELS_ON_STARTUP
+                ),
+                timeout=MODEL_PRELOAD_TIMEOUT_SECONDS,
+            )
+            logger.info("Model preload complete result=%s", preload_result)
+
+            warmup_result = await asyncio.wait_for(
+                asyncio.to_thread(warm_prediction_pipeline),
+                timeout=max(30, MODEL_PRELOAD_TIMEOUT_SECONDS // 2),
+            )
+            logger.info("Prediction pipeline warmup complete result=%s", warmup_result)
+
+        except asyncio.TimeoutError as exc:
+            logger.exception("Model preload timed out timeout_seconds=%s", MODEL_PRELOAD_TIMEOUT_SECONDS)
+            if REQUIRE_MODELS_ON_STARTUP:
+                raise RuntimeError("Model preload timed out during startup") from exc
+
+        except Exception as exc:
+            logger.exception("Model preload failed")
+            if REQUIRE_MODELS_ON_STARTUP:
+                raise
+    else:
+        logger.warning("Model startup preload disabled by PRELOAD_MODELS_ON_STARTUP=false")
+
+    memory_snapshot("startup_after_model_preload")
 
     total_seconds = time.perf_counter() - startup_started_at
 
@@ -558,12 +606,77 @@ async def health():
         "email": email_config_status(),
         "models": models,
         "missing_env": missing_env,
+        "memory": memory_snapshot("health"),
     }
 
 
 @app.get("/health/models", tags=["System"])
 async def health_models():
-    return model_loaded_status()
+    return {
+        "success": True,
+        "artifacts": model_status(),
+        "runtime": model_loaded_status(),
+        "memory": memory_snapshot("health_models"),
+    }
+
+
+@app.get("/health/database", tags=["System"])
+async def health_database():
+    details = mongodb_status()
+    try:
+        await check_database()
+        return {
+            "success": True,
+            "status": "connected",
+            "details": details,
+        }
+    except Exception as exc:
+        logger.exception("Database health failed")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "status": "unreachable",
+                "details": {**details, "reason": str(exc)},
+            },
+        )
+
+
+@app.get("/health/rag", tags=["System"])
+async def health_rag():
+    status_payload = await rag_health_status()
+    status_code = 200 if status_payload.get("ready") else 503
+    return JSONResponse(status_code=status_code, content=status_payload)
+
+
+@app.get("/ready", tags=["System"])
+async def readiness():
+    models = model_loaded_status()
+    loaded = set(models.get("loaded_models", []))
+    missing_models = sorted(SUPPORTED_CROPS - loaded)
+
+    database_ok = True
+    database_error = None
+    try:
+        await check_database()
+    except Exception as exc:
+        database_ok = False
+        database_error = str(exc)
+
+    ready = database_ok and not missing_models
+    status_code = 200 if ready else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "success": ready,
+            "ready": ready,
+            "database_ok": database_ok,
+            "database_error": database_error,
+            "missing_models": missing_models,
+            "models": models,
+            "memory": memory_snapshot("ready"),
+        },
+    )
 
 
 # =========================
