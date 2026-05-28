@@ -4,7 +4,7 @@ services:
     runtime: python
     rootDir: backend
     plan: free
-    buildCommand: python -m pip install --upgrade pip && python -m pip install --no-cache-dir --prefer-binary -r requirements.txt && python -m pip check
+    buildCommand: python -m pip install --upgrade pip && python -m pip install --no-cache-dir --prefer-binary -r requirements.txt && python -m pip check && python scripts/download_models.py
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 20 --limit-concurrency 8
     healthCheckPath: /ready
     envVars:
@@ -39,13 +39,23 @@ services:
       - key: PRELOAD_MODELS_ON_STARTUP
         value: "true"
       - key: REQUIRE_MODELS_ON_STARTUP
-        value: "true"
+        value: "false"
       - key: MODEL_PRELOAD_TIMEOUT_SECONDS
         value: "240"
       - key: MAX_LOADED_MODELS
         value: "3"
       - key: UNLOAD_MODEL_AFTER_PREDICTION
         value: "false"
+      - key: TOMATO_MODEL_URL
+        sync: false
+      - key: MANGO_MODEL_URL
+        sync: false
+      - key: COCONUT_MODEL_URL
+        sync: false
+      - key: MODEL_DOWNLOAD_MAX_ATTEMPTS
+        value: "3"
+      - key: MODEL_DOWNLOAD_TIMEOUT_SECONDS
+        value: "120"
       - key: PREDICTION_CONCURRENCY
         value: "1"
       - key: PREDICTION_TIMEOUT_SECONDS

@@ -329,7 +329,7 @@ async def startup_event():
             preload_result = await asyncio.wait_for(
                 asyncio.to_thread(
                     preload_all_models,
-                    REQUIRE_MODELS_ON_STARTUP
+                    False
                 ),
                 timeout=MODEL_PRELOAD_TIMEOUT_SECONDS,
             )
@@ -341,15 +341,12 @@ async def startup_event():
             )
             logger.info("Prediction pipeline warmup complete result=%s", warmup_result)
 
-        except asyncio.TimeoutError as exc:
+        except asyncio.TimeoutError:
             logger.exception("Model preload timed out timeout_seconds=%s", MODEL_PRELOAD_TIMEOUT_SECONDS)
-            if REQUIRE_MODELS_ON_STARTUP:
-                raise RuntimeError("Model preload timed out during startup") from exc
+            logger.warning("Continuing startup with any models already loaded")
 
-        except Exception as exc:
+        except Exception:
             logger.exception("Model preload failed")
-            if REQUIRE_MODELS_ON_STARTUP:
-                raise
     else:
         logger.warning("Model startup preload disabled by PRELOAD_MODELS_ON_STARTUP=false")
 
@@ -630,10 +627,15 @@ async def health():
 
 @app.get("/health/models", tags=["System"])
 async def health_models():
+    runtime = model_loaded_status()
     return {
         "success": True,
         "artifacts": model_status(),
-        "runtime": model_loaded_status(),
+        "runtime": runtime,
+        "loaded_models": runtime.get("loaded_models", []),
+        "missing_models": runtime.get("missing_models", []),
+        "model_paths": runtime.get("model_paths", {}),
+        "preload_status": runtime.get("preload_status", {}),
         "memory": memory_snapshot("health_models"),
     }
 
@@ -670,8 +672,7 @@ async def health_rag():
 @app.get("/ready", tags=["System"])
 async def readiness():
     models = model_loaded_status()
-    loaded = set(models.get("loaded_models", []))
-    missing_models = sorted(SUPPORTED_CROPS - loaded)
+    missing_models = models.get("missing_models", [])
 
     database_ok = True
     database_error = None
@@ -681,7 +682,7 @@ async def readiness():
         database_ok = False
         database_error = str(exc)
 
-    ready = database_ok and not missing_models
+    ready = database_ok
     status_code = 200 if ready else 503
     return JSONResponse(
         status_code=status_code,

@@ -46,9 +46,9 @@ SUPPORTED_CROPS = ("tomato", "mango", "coconut")
 loaded_models = OrderedDict()
 model_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
 prediction_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
-MIN_MODEL_BYTES = 1024
+MIN_MODEL_BYTES = 1024 * 1024
 MAX_LOADED_MODELS = max(1, int(os.getenv("MAX_LOADED_MODELS", str(len(SUPPORTED_CROPS)))))
-UNLOAD_MODEL_AFTER_PREDICTION = os.getenv("UNLOAD_MODEL_AFTER_PREDICTION", "false").lower() in {"1", "true", "yes", "on"}
+UNLOAD_MODEL_AFTER_PREDICTION = False
 model_load_timings: dict[str, float] = {}
 model_load_errors: dict[str, dict] = {}
 preload_completed_at: float | None = None
@@ -256,15 +256,6 @@ def model_artifact_error(crop: str, model_path: Path) -> dict | None:
     return None
 
 
-def download_model_if_configured(crop: str) -> Path | None:
-    logger.warning(
-        "Runtime model download disabled crop=%s configured_url=%s",
-        crop,
-        configured_model_url(crop),
-    )
-    return None
-
-
 def ensure_configured_models() -> dict[str, str]:
     results = {}
 
@@ -318,11 +309,34 @@ def ensure_configured_models() -> dict[str, str]:
 
 
 def model_loaded_status() -> dict[str, str]:
+    artifact_status = model_status()
+    loaded = set(loaded_models.keys())
+    missing = [
+        crop
+        for crop, status in artifact_status.items()
+        if crop not in loaded or not status.get("available")
+    ]
     return {
         "loaded_models": list(loaded_models.keys()),
+        "missing_models": missing,
         "max_loaded_models": MAX_LOADED_MODELS,
         "unload_after_prediction": UNLOAD_MODEL_AFTER_PREDICTION,
         "preload_completed_at": preload_completed_at,
+        "preload_status": {
+            crop: {
+                "loaded": crop in loaded,
+                "available": status.get("available"),
+                "path": status.get("path"),
+                "warnings": status.get("warnings", []),
+                "load_error": model_load_errors.get(crop),
+                "load_time_ms": model_load_timings.get(crop),
+            }
+            for crop, status in artifact_status.items()
+        },
+        "model_paths": {
+            crop: status.get("path")
+            for crop, status in artifact_status.items()
+        },
         "load_timings_ms": model_load_timings,
         "load_errors": model_load_errors,
         "crops": {
@@ -430,8 +444,8 @@ def load_crop_model(crop: str):
             "path": str(model_path),
             "candidates": [str(path) for path in candidate_model_paths(crop)],
             "hint": (
-                f"Add {crop}_model.keras to backend/models or backend/training and commit it. "
-                "Runtime model downloads are disabled in production."
+                f"Provide {crop}_model.keras in backend/models during the Render build. "
+                f"Set {crop.upper()}_MODEL_URL so scripts/download_models.py can fetch it."
             ),
         }
 
@@ -470,6 +484,28 @@ def load_crop_model(crop: str):
 
     loaded_models.move_to_end(crop)
     entry = loaded_models[crop]
+    return entry["model"], entry["metadata"], None
+
+
+def cached_crop_model(crop: str):
+    if crop not in SUPPORTED_CROPS:
+        return None, None, {"error": "Invalid crop type"}
+
+    entry = loaded_models.get(crop)
+    if not entry:
+        status = model_status().get(crop, {})
+        return None, None, {
+            "error": f"{crop} model is not preloaded",
+            "crop": crop,
+            "path": status.get("path"),
+            "available": status.get("available"),
+            "message": (
+                "This model was not loaded during startup. Check /health/models and Render build logs "
+                f"for {crop.upper()}_MODEL_URL download and preload status."
+            ),
+        }
+
+    loaded_models.move_to_end(crop)
     return entry["model"], entry["metadata"], None
 
 
@@ -574,8 +610,10 @@ def preload_all_models(strict: bool = False) -> dict:
             results[crop] = {"loaded": False, "duration_ms": duration_ms, "error": error}
             if strict:
                 raise RuntimeError(f"{crop} model preload failed: {error}")
+            logger.warning("Model preload skipped crop=%s error=%s", crop, error)
             continue
 
+        logger.info("%s model preloaded", crop)
         results[crop] = {
             "loaded": True,
             "duration_ms": duration_ms,
@@ -587,6 +625,7 @@ def preload_all_models(strict: bool = False) -> dict:
     preload_completed_at = time.time()
     total_ms = round((time.perf_counter() - started_at) * 1000, 2)
     memory_snapshot("preload_models_complete", total_ms=total_ms)
+    logger.info("model cache ready loaded_models=%s max_loaded_models=%s", list(loaded_models.keys()), MAX_LOADED_MODELS)
     return {"duration_ms": total_ms, "results": results, "loaded_models": list(loaded_models.keys())}
 
 
@@ -695,7 +734,7 @@ def predict_image(image_path, model_type):
     try:
         logger.info("Prediction started crop=%s image_path=%s", model_type, image_path)
         memory_snapshot("before_prediction", crop=model_type)
-        model, metadata, error = load_crop_model(model_type)
+        model, metadata, error = cached_crop_model(model_type)
         if error:
             logger.error("Prediction cannot load model crop=%s error=%s", model_type, error)
             return error
@@ -777,12 +816,9 @@ def predict_image(image_path, model_type):
             "message": str(exc),
         }
     finally:
-        if UNLOAD_MODEL_AFTER_PREDICTION:
-            unload_all_models(reason="after_prediction")
-        else:
-            evict_model_cache(except_crop=model_type)
-            gc.collect()
-            memory_snapshot("after_prediction_gc", crop=model_type)
+        evict_model_cache(except_crop=model_type)
+        gc.collect()
+        memory_snapshot("after_prediction_gc", crop=model_type)
 
 
 def find_last_conv_layer(model: tf.keras.Model) -> str | None:
@@ -797,7 +833,7 @@ def find_last_conv_layer(model: tf.keras.Model) -> str | None:
 def create_gradcam(image_path, model_type, output_path=None):
     try:
         logger.info("Grad-CAM started crop=%s image_path=%s", model_type, image_path)
-        model, metadata, error = load_crop_model(model_type)
+        model, metadata, error = cached_crop_model(model_type)
         if error:
             logger.error("Grad-CAM cannot load model crop=%s error=%s", model_type, error)
             return error
@@ -851,9 +887,6 @@ def create_gradcam(image_path, model_type, output_path=None):
             "message": str(exc),
         }
     finally:
-        if UNLOAD_MODEL_AFTER_PREDICTION:
-            unload_all_models(reason="after_gradcam")
-        else:
-            unload_unused_models(active_crop=model_type, reason="after_gradcam")
-            gc.collect()
-            memory_snapshot("after_gradcam_gc", crop=model_type)
+        evict_model_cache(except_crop=model_type)
+        gc.collect()
+        memory_snapshot("after_gradcam_gc", crop=model_type)
