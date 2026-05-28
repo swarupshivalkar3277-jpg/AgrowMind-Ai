@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { BadgeCheck, ChevronDown, Flame, PackageCheck, Search, ShieldCheck, Truck } from "lucide-react";
+import { BadgeCheck, ChevronDown, Flame, Heart, LayoutDashboard, PackageCheck, Search, ShoppingCart, SlidersHorizontal, Truck, ShieldCheck } from "lucide-react";
 
 import EmptyState from "../components/EmptyState";
 import MobileBottomNavbar from "../components/MobileBottomNavbar";
@@ -80,6 +80,12 @@ export default function Marketplace() {
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
+  function clearFilters() {
+    setFilters({ maxPrice: "", rating: "", brand: "", availability: "" });
+    setSearch("");
+    setParams(new URLSearchParams());
+  }
+
   const visibleProducts = useMemo(() => {
     let next = products.filter((product) => {
       if (filters.maxPrice && Number(product.price || 0) > Number(filters.maxPrice)) return false;
@@ -108,6 +114,13 @@ export default function Marketplace() {
         <MarketplaceHeader cartCount={cart.count} listening={voice.listening} onQueryChange={setSearch} onVoice={voice.start} query={search} />
         <div className="marketplaceLayout">
           <aside className="marketSidebar" aria-label="Marketplace filters and trust signals">
+            <section className="sidebarBlock marketplaceQuickLinks">
+              <strong>Quick links</strong>
+              <Link to="/dashboard"><LayoutDashboard size={18} /> Dashboard</Link>
+              <Link to="/orders"><PackageCheck size={18} /> Orders</Link>
+              <Link to="/wishlist"><Heart size={18} /> Wishlist</Link>
+              <Link to="/cart"><ShoppingCart size={18} /> Cart</Link>
+            </section>
             <section className="sidebarBlock marketplaceTrust">
               <span><ShieldCheck size={17} /> Secure payments</span>
               <span><BadgeCheck size={17} /> Verified sellers</span>
@@ -139,6 +152,39 @@ export default function Marketplace() {
                 <select onChange={(event) => updateFilter("crop", event.target.value)} value={crop}>
                   <option value="">All crops</option>
                   {crops.map((item) => <option key={item} value={item}>{item}</option>)}
+                </select>
+              </label>
+            </section>
+            <section className="sidebarBlock marketplaceFilterPanel">
+              <div className="sidebarBlockTitle">
+                <strong><SlidersHorizontal size={17} /> Filters</strong>
+                <button onClick={clearFilters} type="button">Clear</button>
+              </div>
+              <label className="sidebarSelect">
+                <span>Max price</span>
+                <input min="0" onChange={(event) => updateDrawerFilter("maxPrice", event.target.value)} placeholder="Example: 999" type="number" value={filters.maxPrice} />
+              </label>
+              <label className="sidebarSelect">
+                <span>Minimum rating</span>
+                <select onChange={(event) => updateDrawerFilter("rating", event.target.value)} value={filters.rating}>
+                  <option value="">Any rating</option>
+                  <option value="4">4 stars and above</option>
+                  <option value="3">3 stars and above</option>
+                </select>
+              </label>
+              <label className="sidebarSelect">
+                <span>Brand</span>
+                <select onChange={(event) => updateDrawerFilter("brand", event.target.value)} value={filters.brand}>
+                  <option value="">All brands</option>
+                  {brands.map((brand) => <option key={brand} value={brand}>{brand}</option>)}
+                </select>
+              </label>
+              <label className="sidebarSelect">
+                <span>Availability</span>
+                <select onChange={(event) => updateDrawerFilter("availability", event.target.value)} value={filters.availability}>
+                  <option value="">All products</option>
+                  <option value="in_stock">In stock</option>
+                  <option value="low_stock">Low stock</option>
                 </select>
               </label>
             </section>

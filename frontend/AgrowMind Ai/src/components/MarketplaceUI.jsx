@@ -78,6 +78,8 @@ export function MarketplaceHeader({ cartCount = 0, listening = false, onVoice, q
         <button aria-label="Voice search" className={listening ? "listening" : ""} onClick={onVoice} type="button"><Mic size={18} /></button>
       </label>
       <nav className="shopHeaderActions" aria-label="Marketplace shortcuts">
+        <Link className="shopHeaderTextLink" to="/dashboard">Dashboard</Link>
+        <Link className="shopHeaderTextLink" to="/orders">Orders</Link>
         <button aria-label="Notifications" type="button"><Bell size={19} /></button>
         <Link aria-label="Cart" className="shopCartLink" to="/cart"><ShoppingCart size={19} />{cartCount > 0 && <span>{cartCount}</span>}</Link>
         <Link aria-label="Profile" to="/dashboard"><UserRound size={19} /></Link>

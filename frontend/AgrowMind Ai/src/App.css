@@ -77,6 +77,378 @@
   }
 }
 
+/* Advanced mobile-first login and marketplace refinements */
+.advancedLoginShell {
+  min-height: 100vh;
+  align-items: stretch;
+  background:
+    radial-gradient(circle at 12% 12%, rgba(250, 204, 21, .42), transparent 30%),
+    linear-gradient(135deg, #e0f2fe 0%, #fef9c3 48%, #ffffff 100%);
+}
+
+.advancedLoginShell .authWelcome {
+  color: #082f49;
+  background:
+    linear-gradient(145deg, rgba(14, 165, 233, .92), rgba(250, 204, 21, .82)),
+    url("https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1200&q=80") center/cover;
+  border: 0;
+  box-shadow: 0 24px 70px rgba(14, 116, 144, .2);
+}
+
+.advancedLoginShell .authWelcome h1,
+.advancedLoginShell .authWelcome p {
+  color: #082f49;
+}
+
+.advancedLoginShell .authIllustration span {
+  color: #082f49;
+  background: rgba(255, 255, 255, .72);
+}
+
+.flipAuthPanel {
+  border: 1px solid rgba(14, 165, 233, .2);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, .9);
+  box-shadow: 0 28px 70px rgba(14, 116, 144, .18);
+}
+
+.flipAuthPanel .eyebrow {
+  color: #0284c7;
+}
+
+.loginStepper {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.loginStepper span {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: #64748b;
+  background: #f1f5f9;
+  font-weight: 900;
+}
+
+.loginStepper span.active {
+  color: #075985;
+  background: #e0f2fe;
+}
+
+.loginStepper i {
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #38bdf8, #facc15);
+}
+
+.loginStage,
+.otpStage {
+  display: grid;
+  gap: 14px;
+}
+
+.flipAuthPanel input,
+.marketplaceFilterPanel input {
+  min-height: 48px;
+}
+
+.otpSendButton {
+  min-height: 50px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 14px;
+  color: #082f49;
+  background: linear-gradient(135deg, #facc15, #38bdf8);
+  font-weight: 950;
+  box-shadow: 0 12px 26px rgba(14, 165, 233, .2);
+}
+
+.otpSendButton:disabled {
+  opacity: .58;
+  cursor: not-allowed;
+}
+
+.otpStage {
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid rgba(14, 165, 233, .22);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(224, 242, 254, .88), rgba(254, 249, 195, .68));
+}
+
+.otpStageHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.otpStageHead span,
+.otpHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #075985;
+  font-weight: 900;
+}
+
+.otpStageHead button {
+  min-height: 34px;
+  padding: 0 11px;
+  border-radius: 999px;
+  color: #075985;
+  background: #fff;
+  font-weight: 900;
+}
+
+.otpHint {
+  align-items: flex-start;
+  padding: 12px;
+  border-radius: 14px;
+  background: #f8fafc;
+  color: #475569;
+  line-height: 1.45;
+}
+
+.otpBoxes {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.otpBoxes span {
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(14, 165, 233, .28);
+  border-radius: 12px;
+  color: #075985;
+  background: #fff;
+  font-weight: 950;
+}
+
+.shopPage {
+  background: #eef6ff;
+}
+
+.shopHeader {
+  border-color: rgba(2, 132, 199, .16);
+  border-radius: 8px;
+  background: #0ea5e9;
+  box-shadow: 0 12px 32px rgba(14, 116, 144, .18);
+}
+
+.shopBrand,
+.shopHeaderActions a,
+.shopHeaderActions button {
+  color: #fff;
+}
+
+.shopBrand span {
+  color: #075985;
+  background: #facc15;
+  border-radius: 8px;
+}
+
+.shopSearch {
+  border-radius: 8px;
+  background: #fff;
+}
+
+.shopHeaderActions a,
+.shopHeaderActions button {
+  border-color: rgba(255, 255, 255, .24);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .14);
+}
+
+.shopHeaderTextLink {
+  width: auto !important;
+  min-width: max-content;
+  padding: 0 12px;
+  font-weight: 900;
+}
+
+.marketSidebar {
+  gap: 10px;
+}
+
+.marketSidebar .sidebarBlock,
+.shopSection,
+.bannerCarousel {
+  border-radius: 8px;
+}
+
+.marketplaceQuickLinks {
+  gap: 8px;
+}
+
+.marketplaceQuickLinks strong,
+.sidebarBlockTitle strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.marketplaceQuickLinks a {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: #075985;
+  background: #e0f2fe;
+  font-weight: 900;
+}
+
+.sidebarBlockTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sidebarBlockTitle button {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #92400e;
+  background: #fef3c7;
+  font-weight: 900;
+}
+
+.marketplaceFilterPanel {
+  background: #fff;
+}
+
+.marketplaceFilterPanel .sidebarSelect input,
+.marketplaceFilterPanel .sidebarSelect select,
+.marketSidebar .sidebarSelect select {
+  border-radius: 8px;
+  border-color: #dbeafe;
+  background: #f8fafc;
+}
+
+.bannerCarousel {
+  box-shadow: 0 16px 38px rgba(14, 116, 144, .16);
+}
+
+.bannerCta,
+.dealsTimer {
+  border-radius: 8px;
+}
+
+.shopProductCard,
+.productCard.shopProductCard,
+.shopSkeleton,
+.miniProduct {
+  border-radius: 8px !important;
+}
+
+.listingToolbar .secondaryButton {
+  background: #facc15;
+  color: #075985;
+}
+
+@media (max-width: 980px) {
+  .marketplaceLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .marketSidebar {
+    position: static;
+    order: 2;
+  }
+
+  .marketMain {
+    order: 1;
+  }
+}
+
+@media (max-width: 760px) {
+  .advancedLoginShell {
+    padding: 12px;
+  }
+
+  .advancedLoginShell .authWelcome {
+    min-height: 260px;
+    padding: 20px;
+    border-radius: 18px;
+  }
+
+  .flipAuthPanel {
+    padding: 20px;
+    border-radius: 18px;
+  }
+
+  .loginStepper span {
+    padding: 0 10px;
+    font-size: .78rem;
+  }
+
+  .shopShell {
+    width: min(100% - 20px, 1320px);
+    margin-top: 10px;
+  }
+
+  .shopHeader {
+    position: sticky;
+    top: 8px;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+  }
+
+  .shopSearch {
+    grid-column: 1 / -1;
+    order: 2;
+  }
+
+  .shopHeaderActions {
+    justify-content: flex-end;
+  }
+
+  .shopHeaderTextLink {
+    display: none !important;
+  }
+
+  .bannerCarousel,
+  .bannerSlide {
+    min-height: 260px;
+  }
+
+  .bannerSlide {
+    padding: 22px;
+  }
+
+  .shopSection {
+    padding: 12px;
+  }
+
+  .shopSectionHead {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .listingToolbar {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .listingToolbar select,
+  .listingToolbar button {
+    width: 100%;
+  }
+}
+
 .shopSearch button.listening, .chatInput button.listening {
   color: #fff;
   background: #16a34a;

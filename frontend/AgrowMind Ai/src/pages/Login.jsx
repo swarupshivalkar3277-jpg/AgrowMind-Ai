@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { CheckCircle2, Leaf, Mail, ShieldCheck, Smartphone } from "lucide-react";
+import { ArrowRight, CheckCircle2, KeyRound, Leaf, Mail, ShieldCheck, Smartphone } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { useAuth } from "../context/AuthContext";
@@ -35,6 +35,7 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
   const [submitting, setSubmitting] = useState(false);
   const [sendingOtp, setSendingOtp] = useState(false);
   const [otpCooldown, setOtpCooldown] = useState(0);
+  const [otpSent, setOtpSent] = useState(false);
   const otpDigits = Array.from({ length: 6 }, (_, index) => otpCode[index] || "");
 
   useEffect(() => {
@@ -80,6 +81,7 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
       await sendOtp({ email, purpose });
       setMessage("OTP sent to your email.");
       toast.success("OTP sent to your email");
+      setOtpSent(true);
       setOtpCooldown(60);
     } catch (err) {
       setError(normalizeError(err));
@@ -89,7 +91,7 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
   }
 
   return (
-    <section className="marketAuthShell">
+    <section className="marketAuthShell advancedLoginShell">
       <motion.aside className="authWelcome" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
         <button className="backButton" onClick={onHome} type="button">Back to home</button>
         <div className="authLogo"><Leaf size={26} /><strong>AgroMind</strong></div>
@@ -101,74 +103,101 @@ export default function Login({ onHome, onSwitch, startForgot = false }) {
           <span><Smartphone size={22} /> OTP protected login</span>
         </div>
       </motion.aside>
-      <motion.div className="authPanel premiumAuthPanel" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}>
-      <p className="eyebrow">{forgotMode ? "Reset Password" : "Welcome Back"}</p>
-      <h1>{forgotMode ? "Forgot Password" : "Login"}</h1>
-      <div className="loginTabs">
-        <button className="active" type="button"><Mail size={16} /> Email</button>
-        <button type="button"><Smartphone size={16} /> Mobile OTP</button>
+      <motion.div className="authPanel premiumAuthPanel flipAuthPanel" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}>
+      <p className="eyebrow">{forgotMode ? "Reset Password" : "Secure Login"}</p>
+      <h1>{forgotMode ? "Reset access" : "Login to continue"}</h1>
+      <div className="loginStepper" aria-label="Login progress">
+        <span className="active"><Mail size={16} /> Details</span>
+        <i />
+        <span className={otpSent ? "active" : ""}><KeyRound size={16} /> OTP</span>
       </div>
       <form className="authForm" onSubmit={handleSubmit}>
-        <label>
-          <span>Email</span>
-          <input
-            autoComplete="email"
-            onChange={(event) => setEmail(event.target.value)}
-            required
-            type="email"
-            value={email}
-          />
-        </label>
-        {!forgotMode && (
+        <motion.div className="loginStage" layout>
           <label>
-            <span>Password</span>
+            <span>Email</span>
             <input
-              autoComplete="current-password"
-              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="email"
+              onChange={(event) => { setEmail(event.target.value); setOtpSent(false); setOtpCode(""); }}
+              placeholder="farmer@example.com"
               required
-              type="password"
-              value={password}
+              type="email"
+              value={email}
             />
           </label>
-        )}
-        {forgotMode && (
-          <label>
-            <span>New Password</span>
-            <input
-              autoComplete="new-password"
-              minLength="6"
-              onChange={(event) => setNewPassword(event.target.value)}
-              required
-              type="password"
-              value={newPassword}
-            />
-          </label>
-        )}
-        <div className="otpRow">
-          <label>
-            <span>Email OTP</span>
-            <input
-              autoComplete="one-time-code"
-              inputMode="numeric"
-              maxLength="8"
-              onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
-              pattern="[0-9]{4,8}"
-              placeholder="6 digit OTP"
-              required
-              type="text"
-              value={otpCode}
-            />
-          </label>
-          <button className="secondaryButton" disabled={!email || sendingOtp || otpCooldown > 0} onClick={() => handleSendOtp(forgotMode ? "forgot_password" : "login")} type="button">
-            {sendingOtp ? "Sending..." : otpCooldown > 0 ? `Wait ${otpCooldown}s` : "Send OTP"}
+          {!forgotMode && (
+            <label>
+              <span>Password</span>
+              <input
+                autoComplete="current-password"
+                onChange={(event) => { setPassword(event.target.value); setOtpSent(false); setOtpCode(""); }}
+                placeholder="Enter password"
+                required
+                type="password"
+                value={password}
+              />
+            </label>
+          )}
+          {forgotMode && (
+            <label>
+              <span>New Password</span>
+              <input
+                autoComplete="new-password"
+                minLength="6"
+                onChange={(event) => setNewPassword(event.target.value)}
+                placeholder="Create new password"
+                required
+                type="password"
+                value={newPassword}
+              />
+            </label>
+          )}
+          <button className="otpSendButton" disabled={!email || (!forgotMode && !password) || sendingOtp || otpCooldown > 0} onClick={() => handleSendOtp(forgotMode ? "forgot_password" : "login")} type="button">
+            {sendingOtp ? "Sending OTP..." : otpCooldown > 0 ? `Resend in ${otpCooldown}s` : <>Send OTP <ArrowRight size={17} /></>}
           </button>
-        </div>
-        <div className="otpBoxes" aria-hidden="true">{otpDigits.map((digit, index) => <span key={index}>{digit}</span>)}</div>
+        </motion.div>
+        <AnimatePresence initial={false}>
+          {otpSent && (
+            <motion.div
+              animate={{ opacity: 1, y: 0, height: "auto" }}
+              className="otpStage"
+              exit={{ opacity: 0, y: -8, height: 0 }}
+              initial={{ opacity: 0, y: 8, height: 0 }}
+            >
+              <div className="otpStageHead">
+                <span><ShieldCheck size={17} /> OTP sent</span>
+                <button disabled={sendingOtp || otpCooldown > 0} onClick={() => handleSendOtp(forgotMode ? "forgot_password" : "login")} type="button">
+                  {otpCooldown > 0 ? `${otpCooldown}s` : "Resend"}
+                </button>
+              </div>
+              <label>
+                <span>Email OTP</span>
+                <input
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
+                  maxLength="8"
+                  onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
+                  pattern="[0-9]{4,8}"
+                  placeholder="6 digit OTP"
+                  required
+                  type="text"
+                  value={otpCode}
+                />
+              </label>
+              <div className="otpBoxes" aria-hidden="true">{otpDigits.map((digit, index) => <span key={index}>{digit}</span>)}</div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        {!otpSent && (
+          <div className="otpHint">
+            <Smartphone size={17} />
+            <span>Enter email and password first. The OTP section opens after sending verification.</span>
+          </div>
+        )}
         <AnimatePresence>
           {message && <motion.div className="successAlert" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>{message}</motion.div>}
           {(error || searchParams.get("error")) && <motion.div className="alert" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>{error || searchParams.get("error")}</motion.div>}
         </AnimatePresence>
-        <button className="primaryButton" disabled={submitting} type="submit">
+        <button className="primaryButton" disabled={submitting || !otpSent} type="submit">
           {submitting ? "Please wait..." : forgotMode ? "Reset Password" : "Login"}
         </button>
       </form>
