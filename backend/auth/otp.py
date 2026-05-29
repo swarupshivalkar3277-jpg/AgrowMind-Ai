@@ -12,6 +12,7 @@ from fastapi import HTTPException
 import httpx
 
 from database.mongodb import db
+from utils.env import env_bool
 
 
 OTP_EXPIRY_MINUTES = int(os.getenv("EMAIL_OTP_EXPIRY_MINUTES", "10"))
@@ -24,7 +25,7 @@ logger = logging.getLogger("agromind.auth.otp")
 
 
 def otp_required() -> bool:
-    return os.getenv("EMAIL_OTP_REQUIRED", "true").lower() in {"1", "true", "yes", "on"}
+    return env_bool("EMAIL_OTP_REQUIRED", True)
 
 
 def is_production() -> bool:
@@ -34,7 +35,7 @@ def is_production() -> bool:
 def dev_email_fallback_enabled() -> bool:
     return (
         not is_production()
-        and os.getenv("EMAIL_OTP_DEV_FALLBACK", "false").lower() in {"1", "true", "yes", "on"}
+        and env_bool("EMAIL_OTP_DEV_FALLBACK")
     )
 
 

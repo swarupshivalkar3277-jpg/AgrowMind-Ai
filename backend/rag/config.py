@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from utils.env import env_bool
+
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -29,4 +31,4 @@ MIN_SIMILARITY = float(os.getenv("RAG_MIN_SIMILARITY", "0.2"))
 LLM_PROVIDER = os.getenv("RAG_LLM_PROVIDER", "").strip().lower()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-RAG_REQUIRE_LLM = os.getenv("RAG_REQUIRE_LLM", "false").lower() in {"1", "true", "yes", "on"}
+RAG_REQUIRE_LLM = env_bool("RAG_REQUIRE_LLM")

@@ -46,6 +46,8 @@ services:
         value: "1"
       - key: UNLOAD_MODEL_AFTER_PREDICTION
         value: "false"
+      - key: ENABLE_RUNTIME_MODEL_DOWNLOAD
+        value: "true"
       - key: TOMATO_MODEL_URL
         sync: false
       - key: MANGO_MODEL_URL

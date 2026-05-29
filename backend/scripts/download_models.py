@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
 import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -14,6 +15,11 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(
 logger = logging.getLogger("agromind.model_download")
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from utils.env import env_bool
+
 MODEL_DIR = BACKEND_DIR / "models"
 MIN_MODEL_BYTES = 1024 * 1024
 CHUNK_SIZE = 1024 * 1024
@@ -110,13 +116,14 @@ def verify_model(path: Path) -> int:
 def download_model(crop: str, env_name: str, filename: str) -> dict:
     url = os.getenv(env_name, "").strip()
     destination = MODEL_DIR / filename
-    if not url:
-        raise RuntimeError(f"{env_name} is not configured")
 
     if destination.exists():
         size = verify_model(destination)
         logger.info("%s model already exists path=%s size_bytes=%s; skipping download", crop, destination, size)
         return {"crop": crop, "path": str(destination), "size_bytes": size, "skipped": True}
+
+    if not url:
+        raise RuntimeError(f"{env_name} is not configured")
 
     logger.info("downloading %s model", crop)
     last_error: Exception | None = None
@@ -139,6 +146,11 @@ def download_model(crop: str, env_name: str, filename: str) -> dict:
 def main() -> None:
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     logger.info("model download directory ready path=%s", MODEL_DIR)
+    logger.info(
+        "ENABLE_RUNTIME_MODEL_DOWNLOAD=%s parsed=%s",
+        os.getenv("ENABLE_RUNTIME_MODEL_DOWNLOAD"),
+        env_bool("ENABLE_RUNTIME_MODEL_DOWNLOAD"),
+    )
 
     results = {}
     failures = {}

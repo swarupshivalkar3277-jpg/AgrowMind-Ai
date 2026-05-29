@@ -21,6 +21,8 @@ import psutil
 from PIL import Image
 
 from ai.recommendations import recommendation_for, validate_recommendation_coverage
+from scripts.download_models import download_model
+from utils.env import env_bool
 
 
 tf = None
@@ -30,13 +32,15 @@ PROJECT_DIR = BASE_DIR.parent
 AI_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
 CLASS_NAMES_DIR = TRAINING_DIR / "class_names"
-MODEL_DIRS = [
-    Path(path).expanduser()
-    for path in os.getenv("MODEL_DIRS", "").split(os.pathsep)
-    if path.strip()
-] or [
-    BASE_DIR / "models",
-]
+MODEL_DIR = BASE_DIR / "models"
+
+
+def _model_dir_from_env(value: str) -> Path:
+    path = Path(value.strip()).expanduser()
+    return path if path.is_absolute() else BASE_DIR / path
+
+
+MODEL_DIRS = [_model_dir_from_env(path) for path in os.getenv("MODEL_DIRS", "").split(os.pathsep) if path.strip()] or [MODEL_DIR]
 IMG_SIZE = 224
 SUPPORTED_CROPS = ("tomato", "mango", "coconut")
 
@@ -45,7 +49,7 @@ model_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
 prediction_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
 MIN_MODEL_BYTES = 1024 * 1024
 MAX_LOADED_MODELS = max(1, int(os.getenv("MAX_LOADED_MODELS", "1")))
-UNLOAD_MODEL_AFTER_PREDICTION = os.getenv("UNLOAD_MODEL_AFTER_PREDICTION", "false").lower() in {"1", "true", "yes", "on"}
+UNLOAD_MODEL_AFTER_PREDICTION = env_bool("UNLOAD_MODEL_AFTER_PREDICTION")
 model_load_timings: dict[str, float] = {}
 model_load_errors: dict[str, dict] = {}
 preload_completed_at: float | None = None
@@ -161,6 +165,32 @@ def configured_model_url(crop: str) -> str | None:
     return None
 
 
+def runtime_model_download_enabled() -> bool:
+    return env_bool("ENABLE_RUNTIME_MODEL_DOWNLOAD")
+
+
+def runtime_download_model(crop: str) -> Path | None:
+    filename = f"{crop}_model.keras"
+    env_name = f"{crop.upper()}_MODEL_URL"
+
+    if not runtime_model_download_enabled():
+        logger.warning(
+            "Runtime model download disabled crop=%s env_name=ENABLE_RUNTIME_MODEL_DOWNLOAD env_value=%s",
+            crop,
+            os.getenv("ENABLE_RUNTIME_MODEL_DOWNLOAD"),
+        )
+        return None
+
+    try:
+        result = download_model(crop, env_name, filename)
+        downloaded_path = Path(result["path"])
+        logger.info("Runtime model download complete crop=%s path=%s result=%s", crop, downloaded_path, result)
+        return downloaded_path
+    except Exception as exc:
+        logger.warning("Runtime model download failed crop=%s env_name=%s error=%s", crop, env_name, exc)
+        return None
+
+
 def expected_class_count(crop: str) -> int | None:
     try:
         return len(load_class_names(crop))
@@ -250,18 +280,26 @@ def model_artifact_error(crop: str, model_path: Path) -> dict | None:
 
 def ensure_configured_models() -> dict[str, str]:
     results = {}
+    runtime_download = runtime_model_download_enabled()
 
     for crop in SUPPORTED_CROPS:
         try:
             model_path = next((path for path in candidate_model_paths(crop) if path.exists()), None)
             if not model_path:
-                results[crop] = "missing:runtime_download_disabled"
                 logger.warning(
-                    "Model startup artifact check crop=%s download_url=%s reason=model_not_found runtime_download=false",
+                    "Model startup artifact check crop=%s download_url=%s reason=model_not_found runtime_download=%s",
                     crop,
                     configured_model_url(crop),
+                    runtime_download,
                 )
-                continue
+                if runtime_download:
+                    model_path = runtime_download_model(crop)
+
+                if not model_path:
+                    results[crop] = "missing:runtime_download_failed" if runtime_download else "missing:runtime_download_disabled"
+                    continue
+
+                logger.info("Model startup artifact downloaded crop=%s path=%s", crop, model_path)
 
             size_bytes = model_path.stat().st_size
             expected_count = expected_class_count(crop)
@@ -368,7 +406,7 @@ def model_status() -> dict:
             "path": str(available_path) if available_path else None,
             "size_bytes": size_bytes,
             "download_url": configured_model_url(crop),
-            "runtime_download_enabled": False,
+            "runtime_download_enabled": runtime_model_download_enabled(),
             "model_output_shape": output_shape_from_artifact(available_path) if available_path else None,
             "class_names_path": str(class_names_path(crop)),
             "metadata_class_count": len(class_metadata),
@@ -430,6 +468,11 @@ def load_crop_model(crop: str):
 
     model_path = model_path_for_crop(crop)
     logger.info("Resolving model crop=%s selected_path=%s", crop, model_path)
+    if not model_path.exists():
+        downloaded_path = runtime_download_model(crop)
+        if downloaded_path:
+            model_path = downloaded_path
+
     if not model_path.exists():
         return None, None, {
             "error": f"{crop} model not found",

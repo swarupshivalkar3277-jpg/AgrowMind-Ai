@@ -7,9 +7,10 @@ import time
 from threading import Lock
 
 from rag.config import EMBEDDING_MODEL_NAME
+from utils.env import env_bool
 
 logger = logging.getLogger("agromind.rag.embeddings")
-UNLOAD_EMBEDDER_AFTER_QUERY = os.getenv("RAG_UNLOAD_EMBEDDER_AFTER_QUERY", "false").lower() in {"1", "true", "yes", "on"}
+UNLOAD_EMBEDDER_AFTER_QUERY = env_bool("RAG_UNLOAD_EMBEDDER_AFTER_QUERY")
 
 
 class SentenceTransformerEmbedder:

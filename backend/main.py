@@ -35,6 +35,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
 from pymongo.errors import PyMongoError
+from utils.env import env_bool
 
 # =========================
 # AUTH
@@ -108,20 +109,11 @@ MODEL_PRELOAD_TIMEOUT_SECONDS = max(
     int(os.getenv("MODEL_PRELOAD_TIMEOUT_SECONDS", "240"))
 )
 
-PRELOAD_MODELS_ON_STARTUP = os.getenv(
-    "PRELOAD_MODELS_ON_STARTUP",
-    "false"
-).lower() in {"1", "true", "yes", "on"}
+PRELOAD_MODELS_ON_STARTUP = env_bool("PRELOAD_MODELS_ON_STARTUP")
 
-PRELOAD_RAG_ON_STARTUP = os.getenv(
-    "PRELOAD_RAG_ON_STARTUP",
-    "false"
-).lower() in {"1", "true", "yes", "on"}
+PRELOAD_RAG_ON_STARTUP = env_bool("PRELOAD_RAG_ON_STARTUP")
 
-REQUIRE_MODELS_ON_STARTUP = os.getenv(
-    "REQUIRE_MODELS_ON_STARTUP",
-    "true" if os.getenv("ENVIRONMENT", os.getenv("ENV", "development")).lower() == "production" else "false"
-).lower() in {"1", "true", "yes", "on"}
+REQUIRE_MODELS_ON_STARTUP = env_bool("REQUIRE_MODELS_ON_STARTUP", ENVIRONMENT == "production")
 
 UPLOAD_CLEANUP_MAX_AGE_SECONDS = max(
     300,
@@ -292,6 +284,16 @@ async def startup_event():
     logger.info(
         "Allowed origins=%s",
         ALLOWED_ORIGINS
+    )
+
+    logger.info(
+        "ENABLE_RUNTIME_MODEL_DOWNLOAD=%s",
+        os.getenv("ENABLE_RUNTIME_MODEL_DOWNLOAD"),
+    )
+
+    logger.info(
+        "Parsed runtime model download=%s",
+        env_bool("ENABLE_RUNTIME_MODEL_DOWNLOAD"),
     )
 
     missing_env = missing_required_env_vars()
