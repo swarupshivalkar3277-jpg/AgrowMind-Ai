@@ -25,13 +25,31 @@ def load_recommendations() -> dict:
         return json.load(file)
 
 
+def recommendation_key_candidates(crop_key: str, disease_key: str) -> list[str]:
+    aliases = {
+        "tomato": {
+            "mosaic_virus": "tomato_mosaic_virus",
+            "twospotted_spider_mite": "spider_mites_two_spotted_spider_mite",
+            "yellow_leaf_curl_virus": "tomato_yellow_leaf_curl_virus",
+        }
+    }
+    candidates = [disease_key]
+    alias = aliases.get(crop_key, {}).get(disease_key)
+    if alias and alias not in candidates:
+        candidates.append(alias)
+    return candidates
+
+
 def recommendation_for(crop: str, disease: str) -> dict:
     data = load_recommendations()
     crop_key = normalize_key(crop)
     disease_key = normalize_key(disease)
 
     crop_data = data.get(crop_key, {})
-    recommendation = crop_data.get(disease_key) or data.get("default", {})
+    recommendation = next(
+        (crop_data[key] for key in recommendation_key_candidates(crop_key, disease_key) if key in crop_data),
+        data.get("default", {}),
+    )
 
     display_name = recommendation.get("display_name") or disease.replace("_", " ").strip().title()
     severity = recommendation.get("severity", "Medium")
@@ -63,7 +81,10 @@ def validate_recommendation_coverage(crop: str, class_names: list[str]) -> list[
     required_fields = {"display_name", "severity", "symptoms", "causes", "treatment", "prevention"}
     for class_name in class_names:
         disease_key = normalize_key(class_name)
-        recommendation = crop_data.get(disease_key)
+        recommendation = next(
+            (crop_data[key] for key in recommendation_key_candidates(crop_key, disease_key) if key in crop_data),
+            None,
+        )
         if not recommendation or required_fields - set(recommendation):
             missing.append(class_name)
 

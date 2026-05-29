@@ -6,11 +6,16 @@ import os
 import time
 from threading import Lock
 
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+os.environ.setdefault("OMP_NUM_THREADS", os.getenv("OMP_NUM_THREADS", "1"))
+os.environ.setdefault("MKL_NUM_THREADS", os.getenv("MKL_NUM_THREADS", "1"))
+
 from rag.config import EMBEDDING_MODEL_NAME
 from utils.env import env_bool
 
 logger = logging.getLogger("agromind.rag.embeddings")
 UNLOAD_EMBEDDER_AFTER_QUERY = env_bool("RAG_UNLOAD_EMBEDDER_AFTER_QUERY")
+EMBEDDING_MAX_SEQ_LENGTH = int(os.getenv("RAG_EMBEDDING_MAX_SEQ_LENGTH", "256"))
 
 
 class SentenceTransformerEmbedder:
@@ -34,7 +39,8 @@ class SentenceTransformerEmbedder:
 
                     started_at = time.perf_counter()
                     logger.info("Loading RAG embedding model=%s", EMBEDDING_MODEL_NAME)
-                    self._model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+                    self._model = SentenceTransformer(EMBEDDING_MODEL_NAME, device="cpu")
+                    self._model.max_seq_length = EMBEDDING_MAX_SEQ_LENGTH
                     logger.info(
                         "RAG embedding model loaded model=%s duration_ms=%.2f",
                         EMBEDDING_MODEL_NAME,
@@ -47,13 +53,15 @@ class SentenceTransformerEmbedder:
         return self._model is not None
 
     def embed_text(self, text: str) -> list[float]:
-        embedding = self.model.encode([text], normalize_embeddings=True)[0]
+        with self._lock:
+            embedding = self.model.encode([text], normalize_embeddings=True, batch_size=1, show_progress_bar=False)[0]
         return embedding.tolist()
 
     def embed_documents(self, documents: list[str]) -> list[list[float]]:
         if not documents:
             return []
-        embeddings = self.model.encode(documents, normalize_embeddings=True, batch_size=32)
+        with self._lock:
+            embeddings = self.model.encode(documents, normalize_embeddings=True, batch_size=16, show_progress_bar=False)
         return [embedding.tolist() for embedding in embeddings]
 
     def unload(self, reason: str = "cleanup") -> None:

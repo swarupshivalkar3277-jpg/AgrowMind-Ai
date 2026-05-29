@@ -25,7 +25,7 @@ EMBEDDING_MODEL_NAME = os.getenv("RAG_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
 CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "500"))
 CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "100"))
-DEFAULT_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
+DEFAULT_TOP_K = int(os.getenv("RAG_TOP_K", "3"))
 MIN_SIMILARITY = float(os.getenv("RAG_MIN_SIMILARITY", "0.2"))
 
 LLM_PROVIDER = os.getenv("RAG_LLM_PROVIDER", "").strip().lower()

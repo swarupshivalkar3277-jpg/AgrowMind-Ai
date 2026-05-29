@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import os
-import gc
 import threading
 import time
-import zipfile
 from collections import OrderedDict
 from pathlib import Path
+from typing import Any
 
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
@@ -18,24 +18,26 @@ os.environ.setdefault("TF_INTRA_OP_THREADS", "1")
 
 import numpy as np
 import psutil
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from ai.recommendations import recommendation_for, validate_recommendation_coverage
 from scripts.download_models import download_model
 from utils.env import env_bool
 
 
-tf = None
 logger = logging.getLogger("agromind.ai.predict")
 BASE_DIR = Path(__file__).resolve().parents[1]
-PROJECT_DIR = BASE_DIR.parent
-AI_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
 CLASS_NAMES_DIR = TRAINING_DIR / "class_names"
 MODEL_DIR = BASE_DIR / "models"
 
 
 def _model_dir_from_env(value: str) -> Path:
+    path = Path(value.strip()).expanduser()
+    return path if path.is_absolute() else BASE_DIR / path
+
+
+def _model_path_from_env(value: str) -> Path:
     path = Path(value.strip()).expanduser()
     return path if path.is_absolute() else BASE_DIR / path
 
@@ -48,11 +50,16 @@ loaded_models = OrderedDict()
 model_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
 prediction_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
 MIN_MODEL_BYTES = 1024 * 1024
-MAX_LOADED_MODELS = max(1, int(os.getenv("MAX_LOADED_MODELS", "1")))
+MAX_LOADED_MODELS = max(1, int(os.getenv("MAX_LOADED_MODELS", str(len(SUPPORTED_CROPS)))))
 UNLOAD_MODEL_AFTER_PREDICTION = env_bool("UNLOAD_MODEL_AFTER_PREDICTION")
+MODEL_IDLE_UNLOAD_SECONDS = max(0, int(os.getenv("MODEL_IDLE_UNLOAD_SECONDS", "900")))
 model_load_timings: dict[str, float] = {}
 model_load_errors: dict[str, dict] = {}
 preload_completed_at: float | None = None
+
+_tflite_interpreter_class = None
+_tflite_runtime_name: str | None = None
+_artifact_details_cache: dict[tuple[str, float, int], dict[str, Any]] = {}
 
 
 def memory_snapshot(label: str, **extra) -> dict:
@@ -69,34 +76,198 @@ def memory_snapshot(label: str, **extra) -> dict:
     return snapshot
 
 
-def get_tensorflow():
-    global tf
+def get_tflite_interpreter_class():
+    global _tflite_interpreter_class, _tflite_runtime_name
 
-    if tf is None:
-        import tensorflow as tensorflow_module
+    if _tflite_interpreter_class is not None:
+        return _tflite_interpreter_class
 
-        tf = tensorflow_module
-        try:
-            tf.config.set_visible_devices([], "GPU")
-        except Exception:
-            logger.debug("TensorFlow GPU visibility could not be changed after import", exc_info=True)
-        try:
-            tf.config.threading.set_inter_op_parallelism_threads(int(os.getenv("TF_INTER_OP_THREADS", "1")))
-            tf.config.threading.set_intra_op_parallelism_threads(int(os.getenv("TF_INTRA_OP_THREADS", "1")))
-        except Exception:
-            logger.debug("TensorFlow thread limits could not be set", exc_info=True)
-        memory_snapshot("tensorflow_imported")
-
-    return tf
-
-
-def clear_tensorflow_session() -> None:
-    if tf is None:
-        return
     try:
-        tf.keras.backend.clear_session()
-    except Exception:
-        logger.debug("TensorFlow session cleanup failed", exc_info=True)
+        from ai_edge_litert.interpreter import Interpreter
+
+        _tflite_interpreter_class = Interpreter
+        _tflite_runtime_name = "ai_edge_litert"
+    except ImportError as litert_error:
+        try:
+            import tflite_runtime.interpreter as tflite
+
+            _tflite_interpreter_class = tflite.Interpreter
+            _tflite_runtime_name = "tflite_runtime"
+        except ImportError:
+            try:
+                import tensorflow as tensorflow_module
+
+                _tflite_interpreter_class = tensorflow_module.lite.Interpreter
+                _tflite_runtime_name = "tensorflow.lite"
+            except ImportError as tensorflow_error:
+                raise RuntimeError(
+                    "TensorFlow Lite runtime is not installed. Install ai-edge-litert "
+                    "for production inference, or tensorflow-cpu as a local fallback."
+                ) from tensorflow_error
+        except Exception:
+            raise
+        finally:
+            if _tflite_interpreter_class is None:
+                logger.debug("ai-edge-litert import failed", exc_info=litert_error)
+
+    logger.info("TensorFlow Lite runtime ready runtime=%s", _tflite_runtime_name)
+    memory_snapshot("tflite_runtime_imported", runtime=_tflite_runtime_name)
+    return _tflite_interpreter_class
+
+
+def _shape_from_detail(detail: dict) -> tuple[int, ...] | None:
+    shape = detail.get("shape")
+    if shape is None:
+        return None
+    return tuple(int(dim) for dim in np.asarray(shape).tolist())
+
+
+def _shape_text(shape: tuple[int, ...] | None) -> str | None:
+    return str(shape) if shape else None
+
+
+def _details_shape_text(details: list[dict]) -> str | None:
+    return _shape_text(_shape_from_detail(details[0])) if details else None
+
+
+def _output_size_from_details(output_details: list[dict]) -> int | None:
+    if not output_details:
+        return None
+
+    shape = _shape_from_detail(output_details[0])
+    if not shape:
+        return None
+    if len(shape) == 1:
+        return int(shape[0])
+
+    known_dims = [dim for dim in shape[1:] if dim > 0]
+    if not known_dims:
+        return None
+    return int(np.prod(known_dims))
+
+
+def input_shape_from_interpreter(interpreter) -> tuple[int, ...] | None:
+    return _shape_from_detail(interpreter.get_input_details()[0])
+
+
+def output_shape_from_interpreter(interpreter) -> tuple[int, ...] | None:
+    return _shape_from_detail(interpreter.get_output_details()[0])
+
+
+def output_size_from_interpreter(interpreter) -> int | None:
+    return _output_size_from_details(interpreter.get_output_details())
+
+
+def _interpreter_num_threads() -> int:
+    try:
+        return max(1, int(os.getenv("TFLITE_NUM_THREADS", os.getenv("TF_INTRA_OP_THREADS", "1"))))
+    except ValueError:
+        return 1
+
+
+def load_tflite_model(model_path):
+    path = Path(model_path)
+    if not path.exists():
+        logger.error("TFLite model file missing path=%s", path)
+        raise FileNotFoundError(f"TFLite model file not found: {path}")
+
+    Interpreter = get_tflite_interpreter_class()
+    kwargs = {"model_path": str(path), "num_threads": _interpreter_num_threads()}
+
+    try:
+        interpreter = Interpreter(**kwargs)
+    except TypeError:
+        kwargs.pop("num_threads", None)
+        interpreter = Interpreter(**kwargs)
+
+    try:
+        interpreter.allocate_tensors()
+    except Exception as exc:
+        logger.exception("TFLite tensor allocation failed path=%s", path)
+        raise RuntimeError(f"TFLite tensor allocation failed for {path}: {exc}") from exc
+
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    logger.info(
+        "TFLite model loaded path=%s runtime=%s input_shape=%s output_shape=%s size_bytes=%s",
+        path,
+        _tflite_runtime_name,
+        _details_shape_text(input_details),
+        _details_shape_text(output_details),
+        path.stat().st_size,
+    )
+    return interpreter
+
+
+def _prepare_input_tensor(batch: np.ndarray, input_detail: dict) -> np.ndarray:
+    input_dtype = np.dtype(input_detail["dtype"])
+    tensor = np.asarray(batch, dtype=np.float32)
+
+    if np.issubdtype(input_dtype, np.floating):
+        return tensor.astype(input_dtype, copy=False)
+
+    scale, zero_point = input_detail.get("quantization", (0.0, 0))
+    if scale:
+        tensor = (tensor / float(scale)) + float(zero_point)
+
+    if np.issubdtype(input_dtype, np.integer):
+        limits = np.iinfo(input_dtype)
+        tensor = np.clip(np.rint(tensor), limits.min, limits.max)
+
+    return tensor.astype(input_dtype, copy=False)
+
+
+def _resize_interpreter_input_if_needed(interpreter, input_detail: dict, batch_shape: tuple[int, ...]) -> tuple[list[dict], list[dict]]:
+    current_shape = _shape_from_detail(input_detail)
+    if current_shape == batch_shape:
+        return interpreter.get_input_details(), interpreter.get_output_details()
+
+    try:
+        interpreter.resize_tensor_input(input_detail["index"], batch_shape, strict=False)
+        interpreter.allocate_tensors()
+    except Exception as exc:
+        logger.exception(
+            "TFLite input resize failed current_shape=%s batch_shape=%s",
+            current_shape,
+            batch_shape,
+        )
+        raise RuntimeError(
+            f"TFLite input tensor shape {current_shape} cannot accept image batch shape {batch_shape}"
+        ) from exc
+
+    return interpreter.get_input_details(), interpreter.get_output_details()
+
+
+def predict_tflite(interpreter, img):
+    try:
+        input_details = interpreter.get_input_details()
+        output_details = interpreter.get_output_details()
+        if not input_details or not output_details:
+            raise RuntimeError("TFLite model does not expose input/output tensors")
+
+        batch = np.asarray(img)
+        if batch.ndim == 3:
+            batch = np.expand_dims(batch, axis=0)
+        if batch.ndim != 4:
+            raise ValueError(f"Expected image batch with 4 dimensions, got shape={batch.shape}")
+
+        input_details, output_details = _resize_interpreter_input_if_needed(
+            interpreter,
+            input_details[0],
+            tuple(int(dim) for dim in batch.shape),
+        )
+        input_detail = input_details[0]
+        input_tensor = _prepare_input_tensor(batch, input_detail)
+
+        interpreter.set_tensor(input_detail["index"], input_tensor)
+        interpreter.invoke()
+        prediction = interpreter.get_tensor(output_details[0]["index"])
+        return np.asarray(prediction)
+    except (ValueError, RuntimeError):
+        raise
+    except Exception as exc:
+        logger.exception("TFLite inference tensor error")
+        raise RuntimeError(f"TFLite inference failed: {exc}") from exc
 
 
 def unload_model(crop: str, reason: str = "manual") -> None:
@@ -106,10 +277,9 @@ def unload_model(crop: str, reason: str = "manual") -> None:
     try:
         del removed["model"]
     except Exception:
-        logger.debug("TensorFlow model reference cleanup failed crop=%s", crop, exc_info=True)
-    clear_tensorflow_session()
+        logger.debug("TFLite interpreter reference cleanup failed crop=%s", crop, exc_info=True)
     gc.collect()
-    logger.info("Unloaded TensorFlow model crop=%s reason=%s", crop, reason)
+    logger.info("Unloaded TFLite interpreter crop=%s reason=%s", crop, reason)
     memory_snapshot("after_model_unload", crop=crop, reason=reason)
 
 
@@ -129,8 +299,48 @@ def evict_model_cache(except_crop: str | None = None) -> None:
         evict_crop = next((crop for crop in loaded_models if crop != except_crop), None)
         if evict_crop is None:
             return
-        logger.info("Evicting TensorFlow model crop=%s max_loaded_models=%s", evict_crop, MAX_LOADED_MODELS)
+        logger.info("Evicting TFLite interpreter crop=%s max_loaded_models=%s", evict_crop, MAX_LOADED_MODELS)
         unload_model(evict_crop, reason="cache_limit")
+
+
+def unload_idle_models(except_crop: str | None = None) -> None:
+    if MODEL_IDLE_UNLOAD_SECONDS <= 0:
+        return
+
+    now = time.time()
+    for crop, entry in list(loaded_models.items()):
+        if crop == except_crop:
+            continue
+        last_used_at = float(entry.get("last_used_at", entry.get("loaded_at", now)))
+        idle_seconds = now - last_used_at
+        if idle_seconds >= MODEL_IDLE_UNLOAD_SECONDS:
+            logger.info(
+                "Unloading idle TFLite interpreter crop=%s idle_seconds=%.2f limit=%s",
+                crop,
+                idle_seconds,
+                MODEL_IDLE_UNLOAD_SECONDS,
+            )
+            unload_model(crop, reason="idle_timeout")
+
+
+def candidate_model_paths(crop: str) -> list[Path]:
+    paths: list[Path] = []
+    for env_name in (f"MODEL_PATH_{crop.upper()}", f"{crop.upper()}_MODEL_PATH"):
+        env_path = os.getenv(env_name, "").strip()
+        if env_path:
+            paths.append(_model_path_from_env(env_path))
+
+    filenames = (f"{crop}_model.tflite",)
+    paths.extend(model_dir / filename for model_dir in MODEL_DIRS for filename in filenames)
+
+    unique_paths = []
+    seen = set()
+    for path in paths:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            unique_paths.append(path)
+    return unique_paths
 
 
 def model_path_for_crop(crop: str) -> Path:
@@ -139,16 +349,6 @@ def model_path_for_crop(crop: str) -> Path:
         if path.exists():
             return path
     return candidates[0]
-
-
-def candidate_model_paths(crop: str) -> list[Path]:
-    filenames = (f"{crop}_model.keras",)
-
-    return [
-        model_dir / filename
-        for model_dir in MODEL_DIRS
-        for filename in filenames
-    ]
 
 
 def configured_model_url(crop: str) -> str | None:
@@ -160,7 +360,7 @@ def configured_model_url(crop: str) -> str | None:
 
     base_url = os.getenv("MODEL_BASE_URL", "").strip().rstrip("/")
     if base_url:
-        return f"{base_url}/{crop}_model.keras"
+        return f"{base_url}/{crop}_model.tflite"
 
     return None
 
@@ -170,7 +370,7 @@ def runtime_model_download_enabled() -> bool:
 
 
 def runtime_download_model(crop: str) -> Path | None:
-    filename = f"{crop}_model.keras"
+    filename = f"{crop}_model.tflite"
     env_name = f"{crop.upper()}_MODEL_URL"
 
     if not runtime_model_download_enabled():
@@ -184,10 +384,11 @@ def runtime_download_model(crop: str) -> Path | None:
     try:
         result = download_model(crop, env_name, filename)
         downloaded_path = Path(result["path"])
-        logger.info("Runtime model download complete crop=%s path=%s result=%s", crop, downloaded_path, result)
+        validate_downloaded_model_artifact(crop, downloaded_path)
+        logger.info("Runtime TFLite model download complete crop=%s path=%s result=%s", crop, downloaded_path, result)
         return downloaded_path
     except Exception as exc:
-        logger.warning("Runtime model download failed crop=%s env_name=%s error=%s", crop, env_name, exc)
+        logger.warning("Runtime TFLite model download failed crop=%s env_name=%s error=%s", crop, env_name, exc)
         return None
 
 
@@ -198,52 +399,50 @@ def expected_class_count(crop: str) -> int | None:
         return None
 
 
-def keras_output_size_from_config(model_path: Path) -> int | None:
-    if model_path.suffix.lower() != ".keras":
+def inspect_tflite_artifact(model_path: Path) -> dict[str, Any] | None:
+    if not model_path or not model_path.exists():
         return None
 
+    stat = model_path.stat()
+    cache_key = (str(model_path), stat.st_mtime, stat.st_size)
+    cached = _artifact_details_cache.get(cache_key)
+    if cached:
+        return cached
+
+    interpreter = load_tflite_model(model_path)
+    details = {
+        "input_shape": input_shape_from_interpreter(interpreter),
+        "output_shape": output_shape_from_interpreter(interpreter),
+        "output_size": output_size_from_interpreter(interpreter),
+        "runtime": _tflite_runtime_name,
+    }
+    _artifact_details_cache[cache_key] = details
     try:
-        with zipfile.ZipFile(model_path) as archive:
-            config = json.loads(archive.read("config.json"))
-    except (KeyError, OSError, json.JSONDecodeError, zipfile.BadZipFile):
-        return None
-
-    layers_config = config.get("config", {}).get("layers", [])
-    dense_layers = [
-        layer
-        for layer in layers_config
-        if layer.get("class_name") == "Dense" and layer.get("config", {}).get("units")
-    ]
-    if not dense_layers:
-        return None
-    return int(dense_layers[-1]["config"]["units"])
+        del interpreter
+    finally:
+        gc.collect()
+    return details
 
 
 def output_shape_from_artifact(model_path: Path) -> str | None:
-    output_size = keras_output_size_from_config(model_path)
-    if output_size is None:
-        return None
-    return f"(None, {output_size})"
+    details = inspect_tflite_artifact(model_path)
+    return _shape_text(details.get("output_shape")) if details else None
+
+
+def output_size_from_artifact(model_path: Path) -> int | None:
+    details = inspect_tflite_artifact(model_path)
+    return int(details["output_size"]) if details and details.get("output_size") is not None else None
 
 
 def validate_downloaded_model_artifact(crop: str, model_path: Path) -> None:
     expected_count = expected_class_count(crop)
-    output_size = keras_output_size_from_config(model_path)
     logger.info(
-        "Model artifact validation crop=%s download_url=%s downloaded_file_size=%s model_output_shape=%s class_count=%s",
+        "TFLite artifact validation crop=%s download_url=%s downloaded_file_size=%s class_count=%s",
         crop,
         configured_model_url(crop),
         model_path.stat().st_size if model_path.exists() else None,
-        output_shape_from_artifact(model_path),
         expected_count,
     )
-    if expected_count is None or output_size is None:
-        return
-    if expected_count != output_size:
-        raise RuntimeError(
-            f"Downloaded {crop} model output size {output_size} does not match "
-            f"class metadata count {expected_count}. Check {crop.upper()}_MODEL_URL."
-        )
 
 
 def model_artifact_error(crop: str, model_path: Path) -> dict | None:
@@ -254,25 +453,7 @@ def model_artifact_error(crop: str, model_path: Path) -> dict | None:
             "crop": crop,
             "path": str(model_path),
             "size_bytes": size_bytes,
-            "message": "Model file is too small to be a valid trained model.",
-        }
-
-    expected_count = expected_class_count(crop)
-    output_size = keras_output_size_from_config(model_path)
-    if expected_count is not None and output_size is not None and expected_count != output_size:
-        return {
-            "error": "Model output size does not match class metadata",
-            "crop": crop,
-            "class_count": expected_count,
-            "output_size": output_size,
-            "model_output_shape": output_shape_from_artifact(model_path),
-            "class_names_path": str(class_names_path(crop)),
-            "model_path": str(model_path),
-            "message": (
-                f"{crop} model has {output_size} outputs but class metadata has "
-                f"{expected_count} classes. Update {crop.upper()}_MODEL_URL to the correct model "
-                "or retrain with the expected dataset classes."
-            ),
+            "message": "Model file is too small to be a valid trained TFLite model.",
         }
 
     return None
@@ -287,7 +468,7 @@ def ensure_configured_models() -> dict[str, str]:
             model_path = next((path for path in candidate_model_paths(crop) if path.exists()), None)
             if not model_path:
                 logger.warning(
-                    "Model startup artifact check crop=%s download_url=%s reason=model_not_found runtime_download=%s",
+                    "TFLite startup artifact check crop=%s download_url=%s reason=model_not_found runtime_download=%s",
                     crop,
                     configured_model_url(crop),
                     runtime_download,
@@ -299,39 +480,27 @@ def ensure_configured_models() -> dict[str, str]:
                     results[crop] = "missing:runtime_download_failed" if runtime_download else "missing:runtime_download_disabled"
                     continue
 
-                logger.info("Model startup artifact downloaded crop=%s path=%s", crop, model_path)
+                logger.info("TFLite startup artifact downloaded crop=%s path=%s", crop, model_path)
 
             size_bytes = model_path.stat().st_size
             expected_count = expected_class_count(crop)
-            output_size = keras_output_size_from_config(model_path)
-            output_shape = output_shape_from_artifact(model_path)
             logger.info(
-                "Model startup artifact check crop=%s download_url=%s path=%s downloaded_file_size=%s model_output_shape=%s class_count=%s",
+                "TFLite startup artifact check crop=%s download_url=%s path=%s downloaded_file_size=%s class_count=%s",
                 crop,
                 configured_model_url(crop),
                 model_path,
                 size_bytes,
-                output_shape,
                 expected_count,
             )
             if size_bytes < MIN_MODEL_BYTES:
                 results[crop] = "invalid:file_too_small"
-                logger.warning("Model startup warning crop=%s reason=file_too_small size_bytes=%s", crop, size_bytes)
-                continue
-            if expected_count is not None and output_size is not None and expected_count != output_size:
-                results[crop] = "invalid:output_shape_mismatch"
-                logger.warning(
-                    "Model startup warning crop=%s reason=output_shape_mismatch output_size=%s class_count=%s",
-                    crop,
-                    output_size,
-                    expected_count,
-                )
+                logger.warning("TFLite startup warning crop=%s reason=file_too_small size_bytes=%s", crop, size_bytes)
                 continue
 
             results[crop] = f"available:{model_path}"
-        except Exception as exc:
-            results[crop] = f"exception:{type(exc).__name__}"
-            logger.exception("Model startup exception crop=%s", crop)
+        except Exception:
+            results[crop] = "exception:RuntimeError"
+            logger.exception("TFLite startup exception crop=%s", crop)
         if crop not in results:
             results[crop] = "missing"
 
@@ -350,6 +519,7 @@ def model_loaded_status() -> dict[str, str]:
         "loaded_models": list(loaded_models.keys()),
         "missing_models": missing,
         "max_loaded_models": MAX_LOADED_MODELS,
+        "model_idle_unload_seconds": MODEL_IDLE_UNLOAD_SECONDS,
         "unload_after_prediction": UNLOAD_MODEL_AFTER_PREDICTION,
         "preload_completed_at": preload_completed_at,
         "preload_status": {
@@ -360,6 +530,8 @@ def model_loaded_status() -> dict[str, str]:
                 "warnings": status.get("warnings", []),
                 "load_error": model_load_errors.get(crop),
                 "load_time_ms": model_load_timings.get(crop),
+                "last_used_at": loaded_models.get(crop, {}).get("last_used_at"),
+                "loaded_at": loaded_models.get(crop, {}).get("loaded_at"),
             }
             for crop, status in artifact_status.items()
         },
@@ -369,6 +541,7 @@ def model_loaded_status() -> dict[str, str]:
         },
         "load_timings_ms": model_load_timings,
         "load_errors": model_load_errors,
+        "runtime": _tflite_runtime_name,
         "crops": {
             crop: "loaded" if crop in loaded_models else "not_loaded"
             for crop in SUPPORTED_CROPS
@@ -384,11 +557,11 @@ def model_status() -> dict:
         available_path = next((path for path in candidates if path.exists()), None)
         size_bytes = available_path.stat().st_size if available_path else None
         warnings = []
+        artifact_details = None
+        loaded_entry = loaded_models.get(crop)
 
         if available_path and size_bytes is not None and size_bytes < MIN_MODEL_BYTES:
-            warnings.append(
-                "model_file_is_too_small_to_be_a_valid_trained_model"
-            )
+            warnings.append("model_file_is_too_small_to_be_a_valid_trained_tflite_model")
 
         class_metadata = []
         try:
@@ -396,7 +569,22 @@ def model_status() -> dict:
         except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
             warnings.append(f"class_metadata_unavailable:{exc}")
 
-        model_output_size = keras_output_size_from_config(available_path) if available_path else None
+        if loaded_entry:
+            model = loaded_entry["model"]
+            artifact_details = {
+                "input_shape": input_shape_from_interpreter(model),
+                "output_shape": output_shape_from_interpreter(model),
+                "output_size": output_size_from_interpreter(model),
+                "runtime": loaded_entry.get("metadata", {}).get("tflite_runtime"),
+            }
+        elif available_path and not warnings:
+            try:
+                artifact_details = inspect_tflite_artifact(available_path)
+            except Exception as exc:
+                logger.exception("TFLite status inspection failed crop=%s path=%s", crop, available_path)
+                warnings.append(f"tflite_artifact_unavailable:{type(exc).__name__}")
+
+        model_output_size = artifact_details.get("output_size") if artifact_details else None
         if class_metadata and model_output_size is not None and len(class_metadata) != model_output_size:
             warnings.append("model_output_size_does_not_match_class_metadata")
 
@@ -407,7 +595,8 @@ def model_status() -> dict:
             "size_bytes": size_bytes,
             "download_url": configured_model_url(crop),
             "runtime_download_enabled": runtime_model_download_enabled(),
-            "model_output_shape": output_shape_from_artifact(available_path) if available_path else None,
+            "model_input_shape": _shape_text(artifact_details.get("input_shape")) if artifact_details else None,
+            "model_output_shape": _shape_text(artifact_details.get("output_shape")) if artifact_details else None,
             "class_names_path": str(class_names_path(crop)),
             "metadata_class_count": len(class_metadata),
             "warnings": warnings,
@@ -417,8 +606,19 @@ def model_status() -> dict:
     return status
 
 
-def metadata_path_for_model(model_path: Path) -> Path:
-    return model_path.with_suffix(".json")
+def metadata_paths_for_model(crop: str, model_path: Path) -> list[Path]:
+    paths = [
+        model_path.with_suffix(".json"),
+        TRAINING_DIR / f"{crop}_model.json",
+    ]
+    unique_paths = []
+    seen = set()
+    for path in paths:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            unique_paths.append(path)
+    return unique_paths
 
 
 def class_names_path(crop: str) -> Path:
@@ -446,12 +646,12 @@ def load_class_names(crop: str) -> list[str]:
 
 
 def load_metadata(crop: str, model_path: Path) -> dict:
-    metadata_path = metadata_path_for_model(model_path)
-    if metadata_path.exists():
-        with metadata_path.open("r", encoding="utf-8") as file:
-            metadata = json.load(file)
-            logger.info("Loaded model metadata crop=%s path=%s metadata_path=%s", crop, model_path, metadata_path)
-            return metadata
+    for metadata_path in metadata_paths_for_model(crop, model_path):
+        if metadata_path.exists():
+            with metadata_path.open("r", encoding="utf-8") as file:
+                metadata = json.load(file)
+                logger.info("Loaded model metadata crop=%s path=%s metadata_path=%s", crop, model_path, metadata_path)
+                return metadata
 
     logger.warning("Model metadata missing crop=%s model_path=%s using runtime defaults", crop, model_path)
     return {
@@ -467,19 +667,20 @@ def load_crop_model(crop: str):
         return None, None, {"error": "Invalid crop type"}
 
     model_path = model_path_for_crop(crop)
-    logger.info("Resolving model crop=%s selected_path=%s", crop, model_path)
+    logger.info("Resolving TFLite model crop=%s selected_path=%s", crop, model_path)
     if not model_path.exists():
         downloaded_path = runtime_download_model(crop)
         if downloaded_path:
             model_path = downloaded_path
 
     if not model_path.exists():
+        logger.error("TFLite model file missing crop=%s selected_path=%s", crop, model_path)
         return None, None, {
             "error": f"{crop} model not found",
             "path": str(model_path),
             "candidates": [str(path) for path in candidate_model_paths(crop)],
             "hint": (
-                f"Provide {crop}_model.keras in backend/models during the Render build. "
+                f"Provide {crop}_model.tflite in backend/models during the Render build. "
                 f"Set {crop.upper()}_MODEL_URL so scripts/download_models.py can fetch it."
             ),
         }
@@ -490,7 +691,7 @@ def load_crop_model(crop: str):
     cache_entry = loaded_models.get(crop)
     artifact_error = model_artifact_error(crop, model_path)
     if artifact_error:
-        logger.error("Model artifact validation failed crop=%s error=%s", crop, artifact_error)
+        logger.error("TFLite artifact validation failed crop=%s error=%s", crop, artifact_error)
         return None, None, artifact_error
 
     needs_load = (
@@ -511,14 +712,16 @@ def load_crop_model(crop: str):
             if not needs_load:
                 loaded_models.move_to_end(crop)
                 entry = loaded_models[crop]
+                entry["last_used_at"] = time.time()
                 return entry["model"], entry["metadata"], None
 
             return _load_crop_model_uncached(crop, model_path, modified_at, class_metadata_modified_at)
     else:
-        logger.debug("Using cached model crop=%s path=%s", crop, model_path)
+        logger.debug("Using cached TFLite interpreter crop=%s path=%s", crop, model_path)
 
     loaded_models.move_to_end(crop)
     entry = loaded_models[crop]
+    entry["last_used_at"] = time.time()
     return entry["model"], entry["metadata"], None
 
 
@@ -541,6 +744,7 @@ def cached_crop_model(crop: str):
         }
 
     loaded_models.move_to_end(crop)
+    entry["last_used_at"] = time.time()
     return entry["model"], entry["metadata"], None
 
 
@@ -559,27 +763,45 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
         }
 
     try:
-        memory_snapshot("before_model_load", crop=crop, path=str(model_path))
-        logger.info("Loading TensorFlow model crop=%s path=%s size_bytes=%s", crop, model_path, model_path.stat().st_size)
-        model = get_tensorflow().keras.models.load_model(model_path, compile=False)
+        memory_snapshot("before_tflite_model_load", crop=crop, path=str(model_path))
+        logger.info("Loading TFLite model crop=%s path=%s size_bytes=%s", crop, model_path, model_path.stat().st_size)
+        model = load_tflite_model(model_path)
+    except FileNotFoundError as exc:
+        logger.exception("TFLite model file missing crop=%s path=%s", crop, model_path)
+        error = {
+            "error": f"{crop} model not found",
+            "path": str(model_path),
+            "message": str(exc),
+            "hint": "Restore a valid .tflite model file at this path or set MODEL_DIRS to a directory that contains it.",
+        }
+        model_load_errors[crop] = error
+        return None, None, error
     except Exception as exc:
-        logger.exception("TensorFlow model load failed crop=%s path=%s", crop, model_path)
+        logger.exception("TFLite model load failed crop=%s path=%s", crop, model_path)
         error = {
             "error": f"{crop} model could not be loaded",
             "path": str(model_path),
             "message": str(exc),
-            "hint": (
-                "Restore a valid trained .keras/.h5 model file at this path "
-                "or set MODEL_DIRS to a directory that contains it."
-            ),
+            "hint": "Restore a valid trained .tflite model file at this path or set MODEL_DIRS to a directory that contains it.",
         }
         model_load_errors[crop] = error
         return None, None, error
 
-    output_size = int(model.output_shape[-1])
-    if len(class_names) != output_size:
+    output_size = output_size_from_interpreter(model)
+    if output_size is None:
+        model_output_shape = _shape_text(output_shape_from_interpreter(model))
         del model
-        clear_tensorflow_session()
+        gc.collect()
+        return None, None, {
+            "error": "Model output size could not be determined",
+            "crop": crop,
+            "model_output_shape": model_output_shape,
+            "model_path": str(model_path),
+        }
+
+    if len(class_names) != output_size:
+        model_output_shape = _shape_text(output_shape_from_interpreter(model))
+        del model
         gc.collect()
         memory_snapshot("after_invalid_model_unload", crop=crop, reason="output_shape_mismatch")
         return None, None, {
@@ -587,7 +809,7 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
             "crop": crop,
             "class_count": len(class_names),
             "output_size": output_size,
-            "model_output_shape": str(getattr(model, "output_shape", None)),
+            "model_output_shape": model_output_shape,
             "class_names_path": str(class_names_path(crop)),
             "model_path": str(model_path),
         }
@@ -595,7 +817,6 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
     missing_recommendations = validate_recommendation_coverage(crop, class_names)
     if missing_recommendations:
         del model
-        clear_tensorflow_session()
         gc.collect()
         memory_snapshot("after_invalid_model_unload", crop=crop, reason="missing_recommendations")
         return None, None, {
@@ -605,25 +826,31 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
         }
 
     metadata["class_names"] = class_names
+    metadata["tflite_runtime"] = _tflite_runtime_name
+    metadata["tflite_input_shape"] = _shape_text(input_shape_from_interpreter(model))
+    metadata["tflite_output_shape"] = _shape_text(output_shape_from_interpreter(model))
     loaded_models[crop] = {
         "path": model_path,
         "modified_at": modified_at,
         "class_metadata_modified_at": class_metadata_modified_at,
         "model": model,
         "metadata": metadata,
+        "loaded_at": time.time(),
+        "last_used_at": time.time(),
     }
     loaded_models.move_to_end(crop)
     evict_model_cache(except_crop=crop)
     model_load_timings[crop] = round((time.perf_counter() - load_started_at) * 1000, 2)
     model_load_errors.pop(crop, None)
     logger.info(
-        "TensorFlow model cached crop=%s path=%s input_shape=%s output_shape=%s",
+        "TFLite interpreter cached crop=%s path=%s input_shape=%s output_shape=%s runtime=%s",
         crop,
         model_path,
-        getattr(model, "input_shape", None),
-        getattr(model, "output_shape", None),
+        metadata["tflite_input_shape"],
+        metadata["tflite_output_shape"],
+        _tflite_runtime_name,
     )
-    memory_snapshot("after_model_load", crop=crop, path=str(model_path))
+    memory_snapshot("after_tflite_model_load", crop=crop, path=str(model_path))
 
     entry = loaded_models[crop]
     return entry["model"], entry["metadata"], None
@@ -645,22 +872,23 @@ def preload_all_models(strict: bool = False) -> dict:
             results[crop] = {"loaded": False, "duration_ms": duration_ms, "error": error}
             if strict:
                 raise RuntimeError(f"{crop} model preload failed: {error}")
-            logger.warning("Model preload skipped crop=%s error=%s", crop, error)
+            logger.warning("TFLite model preload skipped crop=%s error=%s", crop, error)
             continue
 
-        logger.info("%s model preloaded", crop)
+        logger.info("%s TFLite model preloaded", crop)
         results[crop] = {
             "loaded": True,
             "duration_ms": duration_ms,
-            "input_shape": str(getattr(model, "input_shape", None)),
-            "output_shape": str(getattr(model, "output_shape", None)),
+            "input_shape": metadata.get("tflite_input_shape"),
+            "output_shape": metadata.get("tflite_output_shape"),
             "class_count": len(metadata.get("class_names") or []),
+            "runtime": metadata.get("tflite_runtime"),
         }
 
     preload_completed_at = time.time()
     total_ms = round((time.perf_counter() - started_at) * 1000, 2)
     memory_snapshot("preload_models_complete", total_ms=total_ms)
-    logger.info("model cache ready loaded_models=%s max_loaded_models=%s", list(loaded_models.keys()), MAX_LOADED_MODELS)
+    logger.info("TFLite model cache ready loaded_models=%s max_loaded_models=%s", list(loaded_models.keys()), MAX_LOADED_MODELS)
     return {"duration_ms": total_ms, "results": results, "loaded_models": list(loaded_models.keys())}
 
 
@@ -675,10 +903,10 @@ def warm_prediction_pipeline() -> dict:
             batch = apply_input_scale(batch, metadata)
             with prediction_locks[crop]:
                 started_at = time.perf_counter()
-                model.predict(batch, verbose=0)
+                predict_tflite(model, batch)
             warmed[crop] = {"ok": True, "duration_ms": round((time.perf_counter() - started_at) * 1000, 2)}
         except Exception as exc:
-            logger.exception("Prediction warmup failed crop=%s", crop)
+            logger.exception("TFLite prediction warmup failed crop=%s", crop)
             warmed[crop] = {"ok": False, "error": type(exc).__name__, "message": str(exc)}
     memory_snapshot("prediction_warmup_complete")
     return warmed
@@ -689,17 +917,26 @@ def get_model_image_size(model, metadata: dict) -> tuple[int, int]:
     if isinstance(metadata_size, list) and len(metadata_size) == 2:
         return int(metadata_size[0]), int(metadata_size[1])
 
-    input_shape = model.input_shape[0] if isinstance(model.input_shape, list) else model.input_shape
-    height = input_shape[1] or IMG_SIZE
-    width = input_shape[2] or IMG_SIZE
-    return int(width), int(height)
+    input_shape = input_shape_from_interpreter(model)
+    if input_shape and len(input_shape) >= 4:
+        height = input_shape[1] if input_shape[1] > 0 else IMG_SIZE
+        width = input_shape[2] if input_shape[2] > 0 else IMG_SIZE
+        return int(width), int(height)
+
+    return IMG_SIZE, IMG_SIZE
 
 
 def image_to_batch(image_path: str | Path, size: tuple[int, int]) -> np.ndarray:
     logger.info("Preprocessing image path=%s target_size=%s", image_path, size)
-    image = Image.open(image_path).convert("RGB")
-    image = image.resize(size, Image.Resampling.BILINEAR)
-    array = np.asarray(image, dtype=np.float32)
+    try:
+        with Image.open(image_path) as image:
+            image = image.convert("RGB")
+            image = image.resize(size, Image.Resampling.BILINEAR)
+            array = np.asarray(image, dtype=np.float32)
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        logger.warning("Invalid image file path=%s error=%s", image_path, exc)
+        raise ValueError("Invalid image file. Upload a readable JPG, PNG, or WebP image.") from exc
+
     return np.expand_dims(array, axis=0)
 
 
@@ -718,22 +955,34 @@ def apply_input_scale(batch: np.ndarray, metadata: dict) -> np.ndarray:
     if input_scale in {"mobilenetv2_-1_1", "rescale_-1_1", "-1_1"}:
         logger.debug("Applying MobileNetV2 -1..1 input scaling")
         return (batch / 127.5) - 1.0
+
     logger.debug("Leaving image batch unscaled because model metadata input_scale=%s", input_scale)
     return batch
+
+
+def _softmax(scores: np.ndarray) -> np.ndarray:
+    values = np.asarray(scores, dtype=np.float64)
+    values = values - np.max(values)
+    exp_values = np.exp(values)
+    denominator = np.sum(exp_values)
+    if not np.isfinite(denominator) or denominator <= 0:
+        return np.full(values.shape, 1.0 / max(values.size, 1), dtype=np.float32)
+    return (exp_values / denominator).astype(np.float32)
 
 
 def normalize_scores(raw_scores: np.ndarray, temperature: float) -> np.ndarray:
     scores = np.asarray(raw_scores, dtype=np.float64)
     scores = np.squeeze(scores)
-    tensorflow = get_tensorflow()
+    if scores.ndim != 1 or scores.size == 0:
+        raise ValueError(f"Prediction output must be a non-empty 1D score vector, got shape={scores.shape}")
 
     if not np.isclose(np.sum(scores), 1.0, atol=1e-3):
-        scores = tensorflow.nn.softmax(scores / max(temperature, 1e-6)).numpy()
+        scores = _softmax(scores / max(temperature, 1e-6))
     elif temperature and temperature != 1.0:
         scores = np.log(np.clip(scores, 1e-8, 1.0)) / temperature
-        scores = tensorflow.nn.softmax(scores).numpy()
+        scores = _softmax(scores)
 
-    return scores.astype(np.float32)
+    return np.asarray(scores, dtype=np.float32)
 
 
 def class_names_for_scores(crop: str, metadata: dict, scores: np.ndarray, model) -> list[str]:
@@ -746,7 +995,7 @@ def class_names_for_scores(crop: str, metadata: dict, scores: np.ndarray, model)
     raise ValueError(
         "Model output size does not match class metadata: "
         f"crop={crop}, class_count={len(metadata_classes)}, output_size={output_size}, "
-        f"model_output_shape={getattr(model, 'output_shape', None)}"
+        f"model_output_shape={_shape_text(output_shape_from_interpreter(model))}"
     )
 
 
@@ -771,7 +1020,7 @@ def predict_image(image_path, model_type):
         memory_snapshot("before_prediction", crop=model_type)
         model, metadata, error = load_crop_model(model_type)
         if error:
-            logger.error("Prediction cannot load model crop=%s error=%s", model_type, error)
+            logger.error("Prediction cannot load TFLite model crop=%s error=%s", model_type, error)
             return error
         model_file = str(loaded_models[model_type]["path"])
 
@@ -781,14 +1030,15 @@ def predict_image(image_path, model_type):
         batch = apply_input_scale(raw_batch, metadata)
 
         logger.info(
-            "Running prediction crop=%s image_size=%s class_count=%s model_output_shape=%s",
+            "Running TFLite prediction crop=%s image_size=%s class_count=%s model_output_shape=%s",
             model_type,
             image_size,
             len(metadata.get("class_names") or []),
-            getattr(model, "output_shape", None),
+            _shape_text(output_shape_from_interpreter(model)),
         )
         with prediction_locks[model_type]:
-            raw_prediction = model.predict(batch, verbose=0)[0]
+            prediction = predict_tflite(model, batch)
+        raw_prediction = np.squeeze(prediction)
         scores = normalize_scores(raw_prediction, float(metadata.get("temperature", 1.0)))
         try:
             class_names = class_names_for_scores(model_type, metadata, scores, model)
@@ -798,7 +1048,7 @@ def predict_image(image_path, model_type):
                 "crop": model_type,
                 "class_count": int(len(metadata.get("class_names") or [])),
                 "output_size": int(len(scores)),
-                "model_output_shape": str(getattr(model, "output_shape", None)),
+                "model_output_shape": _shape_text(output_shape_from_interpreter(model)),
                 "class_names_path": str(class_names_path(model_type)),
                 "message": str(exc),
             }
@@ -807,7 +1057,7 @@ def predict_image(image_path, model_type):
 
         predicted_index = int(np.argmax(scores))
         predicted_class = class_names[predicted_index]
-        confidence = float(scores[predicted_index] * 100)
+        confidence = float(np.max(scores) * 100)
         top_predictions = [
             {"class_name": class_names[index], "confidence": round(float(scores[index] * 100), 2)}
             for index in np.argsort(scores)[::-1][:5]
@@ -843,6 +1093,13 @@ def predict_image(image_path, model_type):
             },
             "model_file": model_file,
         }
+    except ValueError as exc:
+        logger.warning("Prediction invalid input crop=%s image_path=%s error=%s", model_type, image_path, exc)
+        return {
+            "error": "Invalid image",
+            "exception_type": type(exc).__name__,
+            "message": str(exc),
+        }
     except Exception as exc:
         logger.exception("Prediction exception crop=%s image_path=%s", model_type, image_path)
         return {
@@ -851,6 +1108,7 @@ def predict_image(image_path, model_type):
             "message": str(exc),
         }
     finally:
+        unload_idle_models(except_crop=model_type)
         evict_model_cache(except_crop=model_type)
         if UNLOAD_MODEL_AFTER_PREDICTION:
             unload_model(model_type, reason="after_prediction")
@@ -858,74 +1116,18 @@ def predict_image(image_path, model_type):
         memory_snapshot("after_prediction_gc", crop=model_type)
 
 
-def find_last_conv_layer(model: tf.keras.Model) -> str | None:
-    tensorflow = get_tensorflow()
-
-    for layer in reversed(model.layers):
-        if isinstance(layer, tensorflow.keras.layers.Conv2D):
-            return layer.name
+def find_last_conv_layer(model) -> None:
     return None
 
 
 def create_gradcam(image_path, model_type, output_path=None):
-    try:
-        logger.info("Grad-CAM started crop=%s image_path=%s", model_type, image_path)
-        model, metadata, error = load_crop_model(model_type)
-        if error:
-            logger.error("Grad-CAM cannot load model crop=%s error=%s", model_type, error)
-            return error
-
-        image_size = get_model_image_size(model, metadata)
-        batch = apply_input_scale(image_to_batch(image_path, image_size), metadata)
-        last_conv_layer_name = find_last_conv_layer(model)
-        tensorflow = get_tensorflow()
-
-        if last_conv_layer_name is None:
-            logger.error("Grad-CAM failed crop=%s reason=no_conv2d_layer", model_type)
-            return {"error": "No Conv2D layer found for Grad-CAM"}
-
-        grad_model = tensorflow.keras.Model(
-            model.inputs,
-            [model.get_layer(last_conv_layer_name).output, model.output],
-        )
-
-        with prediction_locks[model_type], tensorflow.GradientTape() as tape:
-            conv_outputs, predictions = grad_model(batch)
-            predicted_index = tensorflow.argmax(predictions[0])
-            class_score = predictions[:, predicted_index]
-
-        grads = tape.gradient(class_score, conv_outputs)
-        pooled_grads = tensorflow.reduce_mean(grads, axis=(0, 1, 2))
-        heatmap = tensorflow.reduce_sum(conv_outputs[0] * pooled_grads, axis=-1)
-        heatmap = tensorflow.maximum(heatmap, 0) / tensorflow.maximum(tensorflow.reduce_max(heatmap), 1e-8)
-        heatmap = heatmap.numpy()
-
-        original = Image.open(image_path).convert("RGB").resize(image_size, Image.Resampling.BILINEAR)
-        heatmap_image = Image.fromarray(np.uint8(255 * heatmap)).resize(image_size, Image.Resampling.BILINEAR)
-        heatmap_image = heatmap_image.convert("L")
-
-        red_overlay = Image.new("RGBA", image_size, (255, 0, 0, 0))
-        red_overlay.putalpha(heatmap_image.point(lambda value: int(value * 0.45)))
-        cam = Image.alpha_composite(original.convert("RGBA"), red_overlay).convert("RGB")
-
-        if output_path is None:
-            output_dir = BASE_DIR / "results"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / f"gradcam_{Path(image_path).stem}.jpg"
-
-        cam.save(output_path)
-        logger.info("Grad-CAM complete crop=%s layer=%s output_path=%s", model_type, last_conv_layer_name, output_path)
-        return {"gradcam_image": str(output_path), "layer": last_conv_layer_name}
-    except Exception as exc:
-        logger.exception("Grad-CAM exception crop=%s image_path=%s", model_type, image_path)
-        return {
-            "error": "Grad-CAM failed",
-            "exception_type": type(exc).__name__,
-            "message": str(exc),
-        }
-    finally:
-        evict_model_cache(except_crop=model_type)
-        if UNLOAD_MODEL_AFTER_PREDICTION:
-            unload_model(model_type, reason="after_gradcam")
-        gc.collect()
-        memory_snapshot("after_gradcam_gc", crop=model_type)
+    logger.warning(
+        "Grad-CAM requested but unavailable for TFLite-only runtime crop=%s image_path=%s",
+        model_type,
+        image_path,
+    )
+    return {
+        "error": "Grad-CAM unavailable for TensorFlow Lite runtime",
+        "crop": model_type,
+        "message": "TFLite interpreters do not expose Keras layers or gradients required for Grad-CAM.",
+    }

@@ -79,6 +79,12 @@ SERVER_SELECTION_TIMEOUT_MS = int(
     os.getenv("MONGO_TIMEOUT_MS", "5000")
 )
 
+CONNECT_TIMEOUT_MS = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "5000"))
+SOCKET_TIMEOUT_MS = int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "15000"))
+MAX_POOL_SIZE = max(1, int(os.getenv("MONGO_MAX_POOL_SIZE", "10")))
+MIN_POOL_SIZE = max(0, int(os.getenv("MONGO_MIN_POOL_SIZE", "0")))
+MAX_IDLE_TIME_MS = int(os.getenv("MONGO_MAX_IDLE_TIME_MS", "30000"))
+
 DNS_NAMESERVERS = [
     nameserver.strip()
     for nameserver in os.getenv(
@@ -106,6 +112,13 @@ try:
 
     client_options = {
         "serverSelectionTimeoutMS": SERVER_SELECTION_TIMEOUT_MS,
+        "connectTimeoutMS": CONNECT_TIMEOUT_MS,
+        "socketTimeoutMS": SOCKET_TIMEOUT_MS,
+        "maxPoolSize": MAX_POOL_SIZE,
+        "minPoolSize": MIN_POOL_SIZE,
+        "maxIdleTimeMS": MAX_IDLE_TIME_MS,
+        "retryWrites": True,
+        "appname": os.getenv("MONGO_APP_NAME", "agromind-ai-render"),
     }
 
     # Enable TLS for Atlas
@@ -122,10 +135,7 @@ try:
 
     db = client[DB_NAME]
 
-    logger.info(
-        "MongoDB connected successfully to database '%s'",
-        DB_NAME
-    )
+    logger.info("MongoDB client configured for database '%s'", DB_NAME)
 
 except InvalidURI:
 
@@ -181,6 +191,11 @@ def database_status() -> dict:
         "configured": client is not None,
         "database_name": DB_NAME,
         "server_selection_timeout_ms": SERVER_SELECTION_TIMEOUT_MS,
+        "connect_timeout_ms": CONNECT_TIMEOUT_MS,
+        "socket_timeout_ms": SOCKET_TIMEOUT_MS,
+        "max_pool_size": MAX_POOL_SIZE,
+        "min_pool_size": MIN_POOL_SIZE,
+        "max_idle_time_ms": MAX_IDLE_TIME_MS,
         "dns_nameservers_configured": bool(DNS_NAMESERVERS),
         "reason": getattr(db, "reason", None) if client is None else None,
     }

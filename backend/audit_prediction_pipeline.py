@@ -4,14 +4,16 @@ import json
 import sys
 from pathlib import Path
 
-import tensorflow as tf
-
+from ai.predict import (
+    candidate_model_paths,
+    class_names_path,
+    inspect_tflite_artifact,
+)
 from ai.recommendations import validate_recommendation_coverage
 
 
 BASE_DIR = Path(__file__).resolve().parent
 TRAINING_DIR = BASE_DIR / "training"
-CLASS_NAMES_DIR = TRAINING_DIR / "class_names"
 CROPS = ("tomato", "mango", "coconut")
 
 
@@ -29,15 +31,22 @@ def class_names_from_payload(payload) -> list[str]:
     return []
 
 
+def existing_model_path(crop: str) -> Path:
+    candidates = candidate_model_paths(crop)
+    return next((path for path in candidates if path.exists()), candidates[0])
+
+
 def audit_crop(crop: str) -> dict:
     failures = []
-    model_path = TRAINING_DIR / f"{crop}_model.keras"
+    model_path = existing_model_path(crop)
     metadata_path = TRAINING_DIR / f"{crop}_model.json"
-    class_path = CLASS_NAMES_DIR / f"{crop}_classes.json"
+    class_path = class_names_path(crop)
 
     metadata = {}
     class_names = []
     output_neurons = None
+    input_shape = None
+    output_shape = None
 
     try:
         metadata = load_json(metadata_path)
@@ -54,8 +63,10 @@ def audit_crop(crop: str) -> dict:
     try:
         if not model_path.exists():
             raise FileNotFoundError(f"Missing file: {model_path}")
-        model = tf.keras.models.load_model(model_path, compile=False)
-        output_neurons = int(model.output_shape[-1])
+        artifact = inspect_tflite_artifact(model_path) or {}
+        output_neurons = artifact.get("output_size")
+        input_shape = str(artifact.get("input_shape"))
+        output_shape = str(artifact.get("output_shape"))
     except Exception as exc:
         failures.append(str(exc))
 
@@ -64,7 +75,7 @@ def audit_crop(crop: str) -> dict:
         failures.append("metadata class_names differ from class JSON")
 
     if output_neurons is not None and class_names and output_neurons != len(class_names):
-        failures.append(f"model output neurons {output_neurons} != class count {len(class_names)}")
+        failures.append(f"TFLite model output neurons {output_neurons} != class count {len(class_names)}")
 
     if metadata.get("class_count") and metadata.get("class_count") != len(class_names):
         failures.append(f"metadata class_count {metadata.get('class_count')} != class JSON count {len(class_names)}")
@@ -86,6 +97,8 @@ def audit_crop(crop: str) -> dict:
         "class_names_path": str(class_path),
         "detected_classes": class_names,
         "class_count": len(class_names),
+        "input_shape": input_shape,
+        "output_shape": output_shape,
         "output_neurons": output_neurons,
         "validation_accuracy": metadata.get("validation_accuracy"),
         "recommendation_coverage": len(missing_recommendations) == 0,

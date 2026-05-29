@@ -1,6 +1,6 @@
 {
   "crop": "mango",
-  "model_file": "mango_model.keras",
+  "model_file": "mango_model.tflite",
   "class_names": [
     "Bacterial Canker",
     "Cutting Weevil",

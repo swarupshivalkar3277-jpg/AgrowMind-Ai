@@ -1,6 +1,6 @@
 {
   "crop": "tomato",
-  "model_file": "tomato_model.keras",
+  "model_file": "tomato_model.tflite",
   "class_names": [
     "bacterial_spot",
     "early_blight",

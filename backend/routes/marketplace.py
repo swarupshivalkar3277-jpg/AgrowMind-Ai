@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import base64
+import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -44,6 +45,9 @@ ORDER_STATUS_FLOW = [
 ORDER_STATUSES = set(ORDER_STATUS_FLOW) | ORDER_STATUSES
 REFUNDABLE_STATUSES = {"paid", "processing", "shipped", "delivered"}
 REFUNDABLE_STATUSES |= {"PAYMENT_SUCCESS", "PROCESSING", "PACKED", "SHIPPED", "OUT_FOR_DELIVERY", "DELIVERED"}
+MAX_CLOUDINARY_IMAGE_BYTES = max(512 * 1024, int(os.getenv("CLOUDINARY_MAX_IMAGE_BYTES", str(8 * 1024 * 1024))))
+CLOUDINARY_UPLOAD_TIMEOUT_SECONDS = float(os.getenv("CLOUDINARY_UPLOAD_TIMEOUT_SECONDS", "25"))
+CLOUDINARY_MAX_GALLERY_IMAGES = max(0, int(os.getenv("CLOUDINARY_MAX_GALLERY_IMAGES", "6")))
 LEGACY_STATUS_MAP = {
     "pending": "ORDER_PLACED",
     "paid": "PAYMENT_SUCCESS",
@@ -157,7 +161,7 @@ async def upload_data_url_to_cloudinary(value: str, folder: str = "agromind/prod
         decoded = base64.b64decode(match.group(2), validate=True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid base64 image") from exc
-    if len(decoded) > 8 * 1024 * 1024:
+    if len(decoded) > MAX_CLOUDINARY_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="Product image is too large")
 
     cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME")
@@ -176,7 +180,8 @@ async def upload_data_url_to_cloudinary(value: str, folder: str = "agromind/prod
         "signature": signature,
     }
     try:
-        async with httpx.AsyncClient(timeout=45) as client:
+        timeout = httpx.Timeout(CLOUDINARY_UPLOAD_TIMEOUT_SECONDS, connect=8.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(f"https://api.cloudinary.com/v1_1/{cloud_name}/image/upload", data=data, files=files)
     except httpx.RequestError as exc:
         logger.exception("Cloudinary upload failed before response")
@@ -194,11 +199,10 @@ async def upload_data_url_to_cloudinary(value: str, folder: str = "agromind/prod
 async def prepare_product_payload(payload: ProductIn) -> dict:
     document = payload.model_dump()
     document["image"] = await upload_data_url_to_cloudinary(document.get("image", ""))
-    document["gallery"] = [
-        await upload_data_url_to_cloudinary(item)
-        for item in document.get("gallery", [])
-        if item
-    ]
+    gallery = [item for item in document.get("gallery", []) if item][:CLOUDINARY_MAX_GALLERY_IMAGES]
+    document["gallery"] = await asyncio.gather(
+        *(upload_data_url_to_cloudinary(item) for item in gallery)
+    )
     return normalize_product_document(document)
 
 
@@ -274,7 +278,6 @@ async def cleanup_seed_products() -> None:
 
 
 async def recommended_products(crop: str, disease: str, limit: int = 6) -> list[dict]:
-    await cleanup_seed_products()
     query = {
         "$or": [
             {"crop_type": crop},
@@ -440,7 +443,6 @@ async def list_products(
     disease: str = "",
     limit: int = Query(default=60, ge=1, le=100),
 ):
-    await cleanup_seed_products()
     filters = []
 
     if search:

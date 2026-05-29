@@ -11,6 +11,8 @@ from rag.prompts.agriculture_prompt import build_agriculture_prompt
 
 logger = logging.getLogger("agromind.rag.llm")
 RAG_LLM_HTTP_TIMEOUT_SECONDS = max(5, int(os.getenv("RAG_LLM_HTTP_TIMEOUT_SECONDS", "30")))
+RAG_LLM_MAX_OUTPUT_TOKENS = max(256, int(os.getenv("RAG_LLM_MAX_OUTPUT_TOKENS", "700")))
+RAG_PROMPT_MAX_CHARS = max(2000, int(os.getenv("RAG_PROMPT_MAX_CHARS", "6000")))
 
 
 class LLMService:
@@ -24,7 +26,9 @@ class LLMService:
         return "extractive"
 
     async def generate_answer(self, question: str, chunks: list[dict]) -> dict:
-        prompt = build_agriculture_prompt(question, chunks)
+        prompt = build_agriculture_prompt(question, chunks[:3])
+        if len(prompt) > RAG_PROMPT_MAX_CHARS:
+            prompt = prompt[:RAG_PROMPT_MAX_CHARS]
         provider = self.provider()
 
         if provider == "gemini":
@@ -45,7 +49,7 @@ class LLMService:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1200},
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": RAG_LLM_MAX_OUTPUT_TOKENS},
         }
         logger.info("Gemini request started model=%s prompt_chars=%s", GEMINI_MODEL, len(prompt))
         try:
@@ -76,7 +80,7 @@ class LLMService:
             "model": OPENAI_MODEL,
             "input": prompt,
             "temperature": 0.2,
-            "max_output_tokens": 1200,
+            "max_output_tokens": RAG_LLM_MAX_OUTPUT_TOKENS,
         }
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         async with httpx.AsyncClient(timeout=RAG_LLM_HTTP_TIMEOUT_SECONDS) as client:

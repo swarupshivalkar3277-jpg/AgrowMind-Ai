@@ -242,7 +242,7 @@ def evaluate_model(model: tf.keras.Model, val_ds, class_names: list[str], output
     y_pred = []
 
     for images, labels in val_ds:
-        probs = model.predict(images, verbose=0)
+        probs = model(images, training=False).numpy()
         y_true.extend(labels.numpy().astype(int).tolist())
         y_pred.extend(np.argmax(probs, axis=1).astype(int).tolist())
 
@@ -376,7 +376,6 @@ def train(args) -> None:
         for key, values in fine_tune_history.history.items():
             history.history.setdefault(key, []).extend(values)
 
-    model = tf.keras.models.load_model(model_path, compile=False)
     output_neurons = int(model.output_shape[-1])
     if output_neurons != len(class_names):
         raise ValueError(f"{args.crop} saved model output neurons {output_neurons} != class count {len(class_names)}")

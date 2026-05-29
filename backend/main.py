@@ -13,6 +13,7 @@ import logging
 import shutil
 import time
 import asyncio
+import contextlib
 
 from pathlib import Path
 from uuid import uuid4
@@ -101,7 +102,7 @@ PREDICTION_CONCURRENCY = max(
 
 PREDICTION_TIMEOUT_SECONDS = max(
     30,
-    int(os.getenv("PREDICTION_TIMEOUT_SECONDS", "150"))
+    int(os.getenv("PREDICTION_TIMEOUT_SECONDS", "75"))
 )
 
 MODEL_PRELOAD_TIMEOUT_SECONDS = max(
@@ -109,16 +110,28 @@ MODEL_PRELOAD_TIMEOUT_SECONDS = max(
     int(os.getenv("MODEL_PRELOAD_TIMEOUT_SECONDS", "240"))
 )
 
-PRELOAD_MODELS_ON_STARTUP = env_bool("PRELOAD_MODELS_ON_STARTUP")
+PRELOAD_MODELS_ON_STARTUP = env_bool("PRELOAD_MODELS_ON_STARTUP", True)
 
 PRELOAD_RAG_ON_STARTUP = env_bool("PRELOAD_RAG_ON_STARTUP")
 
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+ENABLE_RAG_GUIDANCE_ON_PREDICTION = env_bool("ENABLE_RAG_GUIDANCE_ON_PREDICTION")
 
-REQUIRE_MODELS_ON_STARTUP = env_bool(
-    "REQUIRE_MODELS_ON_STARTUP",
-    ENVIRONMENT == "production"
+RAG_PREDICTION_TIMEOUT_SECONDS = max(
+    2,
+    int(os.getenv("RAG_PREDICTION_TIMEOUT_SECONDS", "4"))
 )
+
+MAX_UPLOAD_BYTES = max(
+    512 * 1024,
+    int(os.getenv("MAX_UPLOAD_BYTES", str(8 * 1024 * 1024)))
+)
+
+UPLOAD_CHUNK_BYTES = max(
+    64 * 1024,
+    int(os.getenv("UPLOAD_CHUNK_BYTES", str(1024 * 1024)))
+)
+
+
 UPLOAD_CLEANUP_MAX_AGE_SECONDS = max(
     300,
     int(os.getenv("UPLOAD_CLEANUP_MAX_AGE_SECONDS", "1800"))
@@ -228,6 +241,10 @@ TRUSTED_HOSTS = [
     "agromindai.in",
     "www.agromindai.in",
 ]
+
+for host_value in _csv_env("TRUSTED_HOSTS"):
+    if host_value not in TRUSTED_HOSTS:
+        TRUSTED_HOSTS.append(host_value)
 
 for url_value in [
     os.getenv("BACKEND_URL", ""),
@@ -480,7 +497,7 @@ SUPPORTED_CROPS = {
 # =========================
 # HELPERS
 # =========================
-def save_upload(file: UploadFile) -> str:
+async def save_upload(file: UploadFile) -> str:
 
     if not file.filename:
         raise HTTPException(
@@ -488,25 +505,56 @@ def save_upload(file: UploadFile) -> str:
             detail="No file uploaded"
         )
 
-    suffix = Path(file.filename).suffix or ".jpg"
+    content_type = (file.content_type or "").lower()
+    if content_type and not content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=415,
+            detail="Only image uploads are supported"
+        )
+
+    suffix = Path(file.filename).suffix.lower() or ".jpg"
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported image format. Use JPG, PNG, or WebP."
+        )
 
     filename = f"{uuid4().hex}{suffix}"
 
     file_path = UPLOAD_FOLDER / filename
 
     try:
-
+        total_bytes = 0
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            while True:
+                chunk = await file.read(UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Image is too large. Maximum allowed size is {MAX_UPLOAD_BYTES // 1024 // 1024} MB."
+                    )
+                buffer.write(chunk)
 
         return str(file_path)
 
+    except HTTPException:
+        with contextlib.suppress(Exception):
+            file_path.unlink(missing_ok=True)
+        raise
+
     except Exception as e:
+        logger.exception("Upload failed filename=%s content_type=%s", file.filename, file.content_type)
 
         raise HTTPException(
             status_code=500,
-            detail=f"Upload failed: {str(e)}"
+            detail="Upload failed"
         )
+    finally:
+        with contextlib.suppress(Exception):
+            await file.close()
 
 
 def validate_crop(crop: str):
@@ -713,7 +761,7 @@ async def detect(
     file: UploadFile = File(...)
 ):
 
-    file_path = save_upload(file)
+    file_path = await save_upload(file)
 
     try:
 
@@ -752,7 +800,7 @@ async def predict_crop(
 
     validate_crop(crop)
 
-    file_path = save_upload(file)
+    file_path = await save_upload(file)
 
     started_at = time.perf_counter()
 
@@ -778,7 +826,7 @@ async def predict_crop(
         if "error" in result:
 
             raise HTTPException(
-                status_code=500,
+                status_code=503,
                 detail=result
             )
 
@@ -787,38 +835,62 @@ async def predict_crop(
             result
         )
 
-        market_products = await recommended_products(
-            crop,
-            result.get("disease", ""),
-            limit=6
-        )
+        try:
+            market_products = await recommended_products(
+                crop,
+                result.get("disease", ""),
+                limit=6
+            )
+        except Exception:
+            logger.exception("Marketplace recommendation lookup failed crop=%s disease=%s", crop, result.get("disease", ""))
+            market_products = []
 
         result["marketplace_products"] = market_products
 
         # OPTIONAL RAG
+        if ENABLE_RAG_GUIDANCE_ON_PREDICTION:
+            try:
+
+                rag_guidance = await asyncio.wait_for(
+                    answer_disease_question(
+                        crop,
+                        result.get("disease", ""),
+                        user=user
+                    ),
+                    timeout=RAG_PREDICTION_TIMEOUT_SECONDS,
+                )
+
+                result["rag_guidance"] = rag_guidance
+
+            except Exception:
+
+                logger.exception(
+                    "RAG guidance failed"
+                )
+                result["rag_guidance"] = {
+                    "answer": "Assistant guidance is temporarily unavailable. Use the disease recommendation shown with this prediction.",
+                    "sources": [],
+                    "provider": "prediction_fallback",
+                }
+        else:
+            result["rag_guidance"] = {
+                "answer": "Assistant guidance is available from the AI assistant page.",
+                "sources": [],
+                "provider": "prediction_rag_disabled",
+            }
+
         try:
-
-            rag_guidance = await answer_disease_question(
-                crop,
-                result.get("disease", ""),
-                user=user
-            )
-
-            result["rag_guidance"] = rag_guidance
-
-        except Exception:
-
-            logger.exception(
-                "RAG guidance failed"
-            )
-
-        await db.prediction_history.insert_one({
-            "user_id": str(user["_id"]),
-            "email": user["email"],
-            "crop": crop,
-            "prediction": result,
-            "created_at": datetime.now(timezone.utc)
-        })
+            await db.prediction_history.insert_one({
+                "user_id": str(user["_id"]),
+                "email": user["email"],
+                "crop": crop,
+                "prediction": result,
+                "created_at": datetime.now(timezone.utc)
+            })
+            result["history_saved"] = True
+        except PyMongoError:
+            logger.exception("Prediction history insert failed user=%s crop=%s", user.get("email"), crop)
+            result["history_saved"] = False
 
         return {
             "success": True,

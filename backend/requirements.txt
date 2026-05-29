@@ -1,4 +1,4 @@
-# AgroMind AI backend runtime dependencies for Render Python 3.12.
+# AgroMind AI backend runtime dependencies for Render Python 3.12/3.13.
 # Keep this file focused on direct app dependencies plus compatibility
 # constraints for the TensorFlow/RAG/YOLO stack. Avoid freezing every
 # transitive dependency, because stale transitive pins can break Render builds.
@@ -15,17 +15,16 @@ requests==2.32.3
 # Database and auth
 motor==3.6.0
 pymongo==4.9.2
+dnspython==2.7.0
+certifi==2024.12.14
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 
-# TensorFlow disease prediction models
-tensorflow-cpu==2.16.2
-keras==3.3.3
-ml-dtypes==0.3.2
-numpy==1.26.4
-protobuf==4.25.3
-h5py==3.11.0
+# LiteRT disease prediction inference
+ai-edge-litert==2.1.5
+numpy==1.26.4; python_version < "3.13"
+numpy==2.2.6; python_version >= "3.13"
 pillow==10.4.0
 psutil==6.1.1
 
@@ -38,6 +37,5 @@ chromadb==0.5.23
 sentence-transformers==3.3.1
 pymupdf==1.25.1
 pypdf==5.1.0
-opencv-python-headless==4.10.0.84
 
 onnxruntime==1.20.1

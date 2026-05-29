@@ -14,6 +14,7 @@ from rag.embeddings.embedder import get_embedder
 from rag.retrieval.retriever import get_retriever
 from rag.services.llm_service import get_llm_service
 from rag.vectorstore.chroma_store import chroma_status, get_chroma_store
+from utils.env import env_bool
 
 logger = logging.getLogger("agromind.rag.service")
 RAG_RETRIEVAL_TIMEOUT_SECONDS = max(3, int(os.getenv("RAG_RETRIEVAL_TIMEOUT_SECONDS", "5")))
@@ -21,7 +22,9 @@ RAG_GENERATION_TIMEOUT_SECONDS = max(5, int(os.getenv("RAG_GENERATION_TIMEOUT_SE
 RAG_TOTAL_TIMEOUT_SECONDS = max(8, int(os.getenv("RAG_TOTAL_TIMEOUT_SECONDS", "15")))
 RAG_CONCURRENCY = max(1, int(os.getenv("RAG_CONCURRENCY", "1")))
 RAG_WARMUP_TIMEOUT_SECONDS = max(15, int(os.getenv("RAG_WARMUP_TIMEOUT_SECONDS", "120")))
+RAG_COLD_START_FAST_FALLBACK = env_bool("RAG_COLD_START_FAST_FALLBACK", True)
 rag_semaphore = asyncio.Semaphore(RAG_CONCURRENCY)
+rag_warmup_task: asyncio.Task | None = None
 rag_startup_status: dict = {
     "warmed": False,
     "available": False,
@@ -66,6 +69,13 @@ class RAGService:
             raise HTTPException(status_code=400, detail="Question is required")
 
         try:
+            if RAG_COLD_START_FAST_FALLBACK and not self.retriever.embedder.is_loaded:
+                schedule_rag_warmup()
+                return self.fallback_response(
+                    "The assistant knowledge engine is warming up. Please try again shortly. For urgent crop care, isolate affected plant parts, avoid overwatering, and follow the disease recommendation from the diagnosis result.",
+                    provider="fallback_cold_start",
+                )
+
             async with rag_semaphore:
                 chunks = await asyncio.wait_for(
                     asyncio.to_thread(self.retriever.retrieve, clean_question),
@@ -102,8 +112,12 @@ class RAGService:
                 "The assistant is warming up or the knowledge index is slow right now. Please try again shortly. For urgent crop care, remove badly affected leaves, avoid overwatering, and use only label-approved treatments.",
                 provider="fallback_timeout",
             )
-        except HTTPException:
-            raise
+        except HTTPException as exc:
+            logger.warning("RAG provider returned HTTP error status=%s detail=%s", exc.status_code, exc.detail)
+            return self.fallback_response(
+                "The assistant provider is temporarily unavailable. Please try again shortly. Use the diagnosis recommendation while the assistant recovers.",
+                provider="fallback_provider_error",
+            )
         except Exception:
             logger.exception("RAG request failed")
             return self.fallback_response(
@@ -249,6 +263,26 @@ async def warmup_rag() -> dict:
         asyncio.to_thread(warmup_rag_sync),
         timeout=RAG_WARMUP_TIMEOUT_SECONDS,
     )
+
+
+def schedule_rag_warmup() -> None:
+    global rag_warmup_task
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    if rag_warmup_task and not rag_warmup_task.done():
+        return
+
+    async def _runner() -> None:
+        try:
+            await warmup_rag()
+        except Exception:
+            logger.exception("Background RAG warmup failed")
+
+    rag_warmup_task = loop.create_task(_runner())
 
 
 _rag_service: RAGService | None = None

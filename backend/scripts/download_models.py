@@ -27,9 +27,9 @@ REQUEST_TIMEOUT_SECONDS = int(os.getenv("MODEL_DOWNLOAD_TIMEOUT_SECONDS", "120")
 MAX_ATTEMPTS = int(os.getenv("MODEL_DOWNLOAD_MAX_ATTEMPTS", "3"))
 
 MODELS = {
-    "tomato": ("TOMATO_MODEL_URL", "tomato_model.keras"),
-    "mango": ("MANGO_MODEL_URL", "mango_model.keras"),
-    "coconut": ("COCONUT_MODEL_URL", "coconut_model.keras"),
+    "tomato": ("TOMATO_MODEL_URL", "tomato_model.tflite"),
+    "mango": ("MANGO_MODEL_URL", "mango_model.tflite"),
+    "coconut": ("COCONUT_MODEL_URL", "coconut_model.tflite"),
 }
 
 
@@ -121,6 +121,11 @@ def download_model(crop: str, env_name: str, filename: str) -> dict:
         size = verify_model(destination)
         logger.info("%s model already exists path=%s size_bytes=%s; skipping download", crop, destination, size)
         return {"crop": crop, "path": str(destination), "size_bytes": size, "skipped": True}
+
+    if not url:
+        base_url = os.getenv("MODEL_BASE_URL", "").strip().rstrip("/")
+        if base_url:
+            url = f"{base_url}/{filename}"
 
     if not url:
         raise RuntimeError(f"{env_name} is not configured")

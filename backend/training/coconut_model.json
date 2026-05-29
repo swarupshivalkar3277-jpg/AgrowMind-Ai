@@ -1,6 +1,6 @@
 {
   "crop": "coconut",
-  "model_file": "coconut_model.keras",
+  "model_file": "coconut_model.tflite",
   "class_names": [
     "CCI_Caterpillars",
     "CCI_Leaflets",
