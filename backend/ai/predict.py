@@ -45,6 +45,31 @@ def _model_path_from_env(value: str) -> Path:
 MODEL_DIRS = [_model_dir_from_env(path) for path in os.getenv("MODEL_DIRS", "").split(os.pathsep) if path.strip()] or [MODEL_DIR]
 IMG_SIZE = 224
 SUPPORTED_CROPS = ("tomato", "mango", "coconut")
+PREPROCESSING_MODES = {
+    "internal_rescaling",
+    "zero_to_one",
+    "mobilenet_minus1_to_1",
+    "uint8",
+}
+
+# These TFLite models were exported from the Keras architecture in
+# train_model.py, which contains the MobileNetV2 Rescaling layer inside the
+# graph. Inference must therefore feed raw RGB pixel values, not a second
+# externally normalized tensor.
+PREPROCESSING = {
+    "tomato": {
+        "mode": "internal_rescaling",
+        "method": "internal_rescaling_only",
+    },
+    "mango": {
+        "mode": "internal_rescaling",
+        "method": "internal_rescaling_only",
+    },
+    "coconut": {
+        "mode": "internal_rescaling",
+        "method": "internal_rescaling_only",
+    },
+}
 
 loaded_models = OrderedDict()
 model_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
@@ -130,6 +155,16 @@ def _details_shape_text(details: list[dict]) -> str | None:
     return _shape_text(_shape_from_detail(details[0])) if details else None
 
 
+def _quantization_text(detail: dict) -> str:
+    quantization = detail.get("quantization", None)
+    params = detail.get("quantization_parameters", {}) or {}
+    scales = params.get("scales")
+    zero_points = params.get("zero_points")
+    if scales is not None and len(scales):
+        return f"scales={np.asarray(scales).tolist()} zero_points={np.asarray(zero_points).tolist()}"
+    return str(quantization)
+
+
 def _output_size_from_details(output_details: list[dict]) -> int | None:
     if not output_details:
         return None
@@ -189,10 +224,12 @@ def load_tflite_model(model_path):
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
     logger.info(
-        "TFLite model loaded path=%s runtime=%s input_shape=%s output_shape=%s size_bytes=%s",
+        "TFLite model loaded path=%s runtime=%s input_shape=%s input_dtype=%s input_quantization=%s output_shape=%s size_bytes=%s",
         path,
         _tflite_runtime_name,
         _details_shape_text(input_details),
+        input_details[0].get("dtype") if input_details else None,
+        _quantization_text(input_details[0]) if input_details else None,
         _details_shape_text(output_details),
         path.stat().st_size,
     )
@@ -532,6 +569,7 @@ def model_loaded_status() -> dict[str, str]:
                 "load_time_ms": model_load_timings.get(crop),
                 "last_used_at": loaded_models.get(crop, {}).get("last_used_at"),
                 "loaded_at": loaded_models.get(crop, {}).get("loaded_at"),
+                "preprocessing": loaded_models.get(crop, {}).get("metadata", {}).get("preprocessing"),
             }
             for crop, status in artifact_status.items()
         },
@@ -599,6 +637,7 @@ def model_status() -> dict:
             "model_output_shape": _shape_text(artifact_details.get("output_shape")) if artifact_details else None,
             "class_names_path": str(class_names_path(crop)),
             "metadata_class_count": len(class_metadata),
+            "preprocessing": preprocessing_config_for_crop(crop, {"input_scale": None}),
             "warnings": warnings,
             "candidates": [str(path) for path in candidates],
         }
@@ -712,6 +751,12 @@ def load_crop_model(crop: str):
             if not needs_load:
                 loaded_models.move_to_end(crop)
                 entry = loaded_models[crop]
+                if entry.get("crop") != crop:
+                    return None, None, {
+                        "error": "Model cache crop mismatch",
+                        "crop": crop,
+                        "cached_crop": entry.get("crop"),
+                    }
                 entry["last_used_at"] = time.time()
                 return entry["model"], entry["metadata"], None
 
@@ -721,6 +766,12 @@ def load_crop_model(crop: str):
 
     loaded_models.move_to_end(crop)
     entry = loaded_models[crop]
+    if entry.get("crop") != crop:
+        return None, None, {
+            "error": "Model cache crop mismatch",
+            "crop": crop,
+            "cached_crop": entry.get("crop"),
+        }
     entry["last_used_at"] = time.time()
     return entry["model"], entry["metadata"], None
 
@@ -744,6 +795,12 @@ def cached_crop_model(crop: str):
         }
 
     loaded_models.move_to_end(crop)
+    if entry.get("crop") != crop:
+        return None, None, {
+            "error": "Model cache crop mismatch",
+            "crop": crop,
+            "cached_crop": entry.get("crop"),
+        }
     entry["last_used_at"] = time.time()
     return entry["model"], entry["metadata"], None
 
@@ -829,7 +886,9 @@ def _load_crop_model_uncached(crop: str, model_path: Path, modified_at: float, c
     metadata["tflite_runtime"] = _tflite_runtime_name
     metadata["tflite_input_shape"] = _shape_text(input_shape_from_interpreter(model))
     metadata["tflite_output_shape"] = _shape_text(output_shape_from_interpreter(model))
+    metadata["preprocessing"] = preprocessing_config_for_crop(crop, metadata)
     loaded_models[crop] = {
+        "crop": crop,
         "path": model_path,
         "modified_at": modified_at,
         "class_metadata_modified_at": class_metadata_modified_at,
@@ -900,7 +959,8 @@ def warm_prediction_pipeline() -> dict:
             metadata = entry["metadata"]
             image_size = get_model_image_size(model, metadata)
             batch = np.zeros((1, image_size[1], image_size[0], 3), dtype=np.float32)
-            batch = apply_input_scale(batch, metadata)
+            batch, preprocessing = apply_input_scale(batch, crop, metadata)
+            log_preprocess_summary(crop, batch, preprocessing, model)
             with prediction_locks[crop]:
                 started_at = time.perf_counter()
                 predict_tflite(model, batch)
@@ -947,35 +1007,79 @@ def image_quality_score(batch: np.ndarray) -> float:
     return round(max(0.0, min(1.0, (contrast * 0.55) + (brightness * 0.45))) * 100, 2)
 
 
-def apply_input_scale(batch: np.ndarray, metadata: dict) -> np.ndarray:
-    input_scale = str(
-        metadata.get("input_scale", "model_includes_preprocessing")
-    ).lower()
+def preprocessing_config_for_crop(crop: str, metadata: dict | None = None) -> dict:
+    if crop not in PREPROCESSING:
+        raise ValueError(f"No preprocessing config defined for crop '{crop}'")
 
-    # 0 -> 1 normalization
-    if input_scale in {"rescale_0_1", "0_1"}:
-        logger.debug("Applying 0..1 input scaling")
-        return batch / 255.0
+    config = dict(PREPROCESSING[crop])
+    override = os.getenv(f"{crop.upper()}_PREPROCESSING_MODE", "").strip().lower()
+    if override:
+        config["mode"] = override
+        config["method"] = override
 
-    # MobileNetV2 normalization (-1 -> 1)
-    if (
-        "mobilenetv2" in input_scale
-        or "-1_to_1" in input_scale
-        or input_scale in {
-            "mobilenetv2_-1_1",
-            "rescale_-1_1",
-            "-1_1",
-        }
-    ):
-        logger.debug("Applying MobileNetV2 -1..1 input scaling")
-        return (batch / 127.5) - 1.0
+    mode = str(config.get("mode", "")).strip().lower()
+    if mode not in PREPROCESSING_MODES:
+        raise ValueError(
+            f"Invalid preprocessing mode for crop '{crop}': {mode!r}. "
+            f"Expected one of {sorted(PREPROCESSING_MODES)}."
+        )
 
-    logger.debug(
-        "Leaving image batch unscaled because model metadata input_scale=%s",
-        input_scale,
+    input_scale = str((metadata or {}).get("input_scale", "")).lower()
+    if mode != "internal_rescaling" and "model_includes" in input_scale:
+        logger.warning(
+            "External preprocessing requested for crop=%s mode=%s but metadata says model includes preprocessing input_scale=%s",
+            crop,
+            mode,
+            input_scale,
+        )
+
+    return config
+
+
+def apply_input_scale(batch: np.ndarray, crop: str, metadata: dict) -> tuple[np.ndarray, dict]:
+    config = preprocessing_config_for_crop(crop, metadata)
+    mode = config["mode"]
+    tensor = np.asarray(batch, dtype=np.float32)
+
+    if mode == "internal_rescaling":
+        processed = tensor
+    elif mode == "zero_to_one":
+        processed = tensor / 255.0
+    elif mode == "mobilenet_minus1_to_1":
+        processed = (tensor / 127.5) - 1.0
+    elif mode == "uint8":
+        processed = np.clip(np.rint(tensor), 0, 255).astype(np.uint8)
+    else:
+        raise ValueError(f"Unsupported preprocessing mode for crop '{crop}': {mode}")
+
+    info = {
+        "mode": mode,
+        "method": config.get("method") or mode,
+        "metadata_input_scale": metadata.get("input_scale"),
+    }
+    return processed, info
+
+
+def log_preprocess_summary(crop: str, batch: np.ndarray, preprocessing: dict, interpreter) -> None:
+    input_detail = interpreter.get_input_details()[0]
+    logger.info(
+        "[PREPROCESS] crop=%s dtype=%s shape=%s min=%.6f max=%.6f method=%s mode=%s metadata_input_scale=%s",
+        crop,
+        batch.dtype,
+        tuple(int(dim) for dim in batch.shape),
+        float(np.min(batch)),
+        float(np.max(batch)),
+        preprocessing.get("method"),
+        preprocessing.get("mode"),
+        preprocessing.get("metadata_input_scale"),
     )
-
-    return batch
+    logger.info(
+        "[TFLITE_INPUT] crop=%s input_dtype=%s input_shape=%s quantization=%s",
+        crop,
+        input_detail.get("dtype"),
+        _shape_from_detail(input_detail),
+        _quantization_text(input_detail),
+    )
 
 def _softmax(scores: np.ndarray) -> np.ndarray:
     values = np.asarray(scores, dtype=np.float64)
@@ -1044,14 +1148,17 @@ def predict_image(image_path, model_type):
         image_size = get_model_image_size(model, metadata)
         raw_batch = image_to_batch(image_path, image_size)
         quality = image_quality_score(raw_batch)
-        batch = apply_input_scale(raw_batch, metadata)
+        batch, preprocessing = apply_input_scale(raw_batch, model_type, metadata)
+        log_preprocess_summary(model_type, batch, preprocessing, model)
 
         logger.info(
-            "Running TFLite prediction crop=%s image_size=%s class_count=%s model_output_shape=%s",
+            "Running TFLite prediction crop=%s image_size=%s class_count=%s model_output_shape=%s preprocessing_mode=%s cache_path=%s",
             model_type,
             image_size,
             len(metadata.get("class_names") or []),
             _shape_text(output_shape_from_interpreter(model)),
+            preprocessing.get("mode"),
+            model_file,
         )
         with prediction_locks[model_type]:
             prediction = predict_tflite(model, batch)

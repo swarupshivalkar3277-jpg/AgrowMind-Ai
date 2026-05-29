@@ -19,6 +19,11 @@ The class JSON order must match the TFLite output tensor order. Startup and
 prediction validation fail with a descriptive error if `len(classes)` does not
 match the model output size.
 
+All current crop models include the Keras MobileNetV2 rescaling layer inside
+the exported TFLite graph. The API therefore sends resized RGB `float32` pixels
+in the original `0..255` range and does not apply external `0..1` or `-1..1`
+normalization.
+
 The app first looks for model files in `backend/models/`. You can also set
 `MODEL_DIRS` to one or more directories that contain the files. Separate
 multiple directories with `;` on Windows and `:` on Linux/macOS. Per-crop local
@@ -48,4 +53,11 @@ To audit model tensors and metadata class counts:
 ```powershell
 cd backend
 python audit_prediction_pipeline.py
+```
+
+To inspect the actual request tensor sent to each interpreter:
+
+```powershell
+cd backend
+python scripts/validate_tflite_preprocessing.py --image ..\datasets\tomato\bacterial_spot\img_bs_1.jpg
 ```
