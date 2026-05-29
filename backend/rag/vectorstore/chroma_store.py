@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
+import shutil
 import time
 from pathlib import Path
 from threading import Lock
 
 from rag.config import COLLECTION_NAME, VECTOR_DB_DIR
 
+os.environ["ANONYMIZED_TELEMETRY"] = os.getenv("ANONYMIZED_TELEMETRY", "False")
 logger = logging.getLogger("agromind.rag.vectorstore")
 
 
@@ -23,16 +26,37 @@ class ChromaStore:
     def client(self):
         if self._client is None:
             import chromadb
+            from chromadb.config import Settings
 
             started_at = time.perf_counter()
             logger.info("Loading Chroma persistent client path=%s", self.persist_path)
-            self._client = chromadb.PersistentClient(path=str(self.persist_path))
+            try:
+                self._client = chromadb.PersistentClient(
+                    path=str(self.persist_path),
+                    settings=Settings(anonymized_telemetry=False),
+                )
+            except Exception as exc:
+                logger.warning("Chroma client init failed; recreating vector DB path=%s error=%s", self.persist_path, exc)
+                self._recreate_persist_path()
+                self._client = chromadb.PersistentClient(
+                    path=str(self.persist_path),
+                    settings=Settings(anonymized_telemetry=False),
+                )
             logger.info(
                 "Chroma persistent client loaded path=%s duration_ms=%.2f",
                 self.persist_path,
                 (time.perf_counter() - started_at) * 1000,
             )
         return self._client
+
+    def _recreate_persist_path(self) -> None:
+        resolved = self.persist_path.resolve()
+        backend_dir = Path(__file__).resolve().parents[2]
+        if backend_dir not in resolved.parents and resolved != backend_dir:
+            raise RuntimeError(f"Refusing to recreate Chroma path outside backend: {resolved}")
+        if self.persist_path.exists():
+            shutil.rmtree(self.persist_path)
+        self.persist_path.mkdir(parents=True, exist_ok=True)
 
     @property
     def collection(self):
@@ -151,15 +175,27 @@ def get_chroma_store() -> ChromaStore:
 
 
 def chroma_status() -> dict:
-    store = get_chroma_store()
-    vector_documents = store.count_documents()
-    return {
-        "persist_path": str(store.persist_path),
-        "collection_name": store.collection_name,
-        "client_loaded": store._client is not None,
-        "collection_loaded": store._collection is not None,
-        "vector_documents": vector_documents,
-    }
+    try:
+        store = get_chroma_store()
+        vector_documents = store.count_documents()
+        return {
+            "persist_path": str(store.persist_path),
+            "collection_name": store.collection_name,
+            "client_loaded": store._client is not None,
+            "collection_loaded": store._collection is not None,
+            "vector_documents": vector_documents,
+            "error": None,
+        }
+    except Exception as exc:
+        logger.warning("Chroma status unavailable error=%s", exc)
+        return {
+            "persist_path": str(VECTOR_DB_DIR),
+            "collection_name": COLLECTION_NAME,
+            "client_loaded": False,
+            "collection_loaded": False,
+            "vector_documents": 0,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 _store: ChromaStore | None = None

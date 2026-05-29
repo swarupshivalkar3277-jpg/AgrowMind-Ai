@@ -19,7 +19,7 @@ services:
       - key: MONGO_URL
         sync: false
       - key: MONGO_DB_NAME
-        value: agromind_ai
+        value: agrowmindai
       - key: MONGO_DNS_NAMESERVERS
         value: 1.1.1.1,8.8.8.8
       - key: ENVIRONMENT
@@ -37,13 +37,13 @@ services:
       - key: TF_INTRA_OP_THREADS
         value: "1"
       - key: PRELOAD_MODELS_ON_STARTUP
-        value: "true"
+        value: "false"
       - key: REQUIRE_MODELS_ON_STARTUP
         value: "false"
       - key: MODEL_PRELOAD_TIMEOUT_SECONDS
-        value: "240"
+        value: "120"
       - key: MAX_LOADED_MODELS
-        value: "3"
+        value: "1"
       - key: UNLOAD_MODEL_AFTER_PREDICTION
         value: "false"
       - key: TOMATO_MODEL_URL
@@ -71,7 +71,7 @@ services:
       - key: RAG_UNLOAD_EMBEDDER_AFTER_QUERY
         value: "false"
       - key: PRELOAD_RAG_ON_STARTUP
-        value: "true"
+        value: "false"
       - key: RAG_WARMUP_TIMEOUT_SECONDS
         value: "120"
       - key: FRONTEND_URL
@@ -110,9 +110,11 @@ services:
         value: knowledge_base
       - key: RAG_VECTOR_DB_PATH
         value: vector_db
+      - key: ANONYMIZED_TELEMETRY
+        value: "False"
       - key: RAG_COLLECTION_NAME
         value: agromind_knowledge
       - key: RAG_EMBEDDING_MODEL
         value: all-MiniLM-L6-v2
       - key: MODEL_DIRS
-        value: models:training
+        value: models

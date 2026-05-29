@@ -36,9 +36,6 @@ MODEL_DIRS = [
     if path.strip()
 ] or [
     BASE_DIR / "models",
-    TRAINING_DIR,
-    AI_DIR / "models",
-    PROJECT_DIR,
 ]
 IMG_SIZE = 224
 SUPPORTED_CROPS = ("tomato", "mango", "coconut")
@@ -47,8 +44,8 @@ loaded_models = OrderedDict()
 model_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
 prediction_locks = {crop: threading.Lock() for crop in SUPPORTED_CROPS}
 MIN_MODEL_BYTES = 1024 * 1024
-MAX_LOADED_MODELS = max(1, int(os.getenv("MAX_LOADED_MODELS", str(len(SUPPORTED_CROPS)))))
-UNLOAD_MODEL_AFTER_PREDICTION = False
+MAX_LOADED_MODELS = max(1, int(os.getenv("MAX_LOADED_MODELS", "1")))
+UNLOAD_MODEL_AFTER_PREDICTION = os.getenv("UNLOAD_MODEL_AFTER_PREDICTION", "false").lower() in {"1", "true", "yes", "on"}
 model_load_timings: dict[str, float] = {}
 model_load_errors: dict[str, dict] = {}
 preload_completed_at: float | None = None
@@ -141,12 +138,7 @@ def model_path_for_crop(crop: str) -> Path:
 
 
 def candidate_model_paths(crop: str) -> list[Path]:
-    filenames = (
-        f"{crop}_model.keras",
-        f"{crop}_model.h5",
-        f"{crop}.keras",
-        f"{crop}.h5",
-    )
+    filenames = (f"{crop}_model.keras",)
 
     return [
         model_dir / filename
@@ -734,7 +726,7 @@ def predict_image(image_path, model_type):
     try:
         logger.info("Prediction started crop=%s image_path=%s", model_type, image_path)
         memory_snapshot("before_prediction", crop=model_type)
-        model, metadata, error = cached_crop_model(model_type)
+        model, metadata, error = load_crop_model(model_type)
         if error:
             logger.error("Prediction cannot load model crop=%s error=%s", model_type, error)
             return error
@@ -817,6 +809,8 @@ def predict_image(image_path, model_type):
         }
     finally:
         evict_model_cache(except_crop=model_type)
+        if UNLOAD_MODEL_AFTER_PREDICTION:
+            unload_model(model_type, reason="after_prediction")
         gc.collect()
         memory_snapshot("after_prediction_gc", crop=model_type)
 
@@ -833,7 +827,7 @@ def find_last_conv_layer(model: tf.keras.Model) -> str | None:
 def create_gradcam(image_path, model_type, output_path=None):
     try:
         logger.info("Grad-CAM started crop=%s image_path=%s", model_type, image_path)
-        model, metadata, error = cached_crop_model(model_type)
+        model, metadata, error = load_crop_model(model_type)
         if error:
             logger.error("Grad-CAM cannot load model crop=%s error=%s", model_type, error)
             return error
@@ -888,5 +882,7 @@ def create_gradcam(image_path, model_type, output_path=None):
         }
     finally:
         evict_model_cache(except_crop=model_type)
+        if UNLOAD_MODEL_AFTER_PREDICTION:
+            unload_model(model_type, reason="after_gradcam")
         gc.collect()
         memory_snapshot("after_gradcam_gc", crop=model_type)

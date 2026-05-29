@@ -7,6 +7,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_INTER_OP_THREADS"] = os.getenv("TF_INTER_OP_THREADS", "1")
 os.environ["TF_INTRA_OP_THREADS"] = os.getenv("TF_INTRA_OP_THREADS", "1")
+os.environ["ANONYMIZED_TELEMETRY"] = os.getenv("ANONYMIZED_TELEMETRY", "False")
 
 import logging
 import shutil
@@ -109,12 +110,12 @@ MODEL_PRELOAD_TIMEOUT_SECONDS = max(
 
 PRELOAD_MODELS_ON_STARTUP = os.getenv(
     "PRELOAD_MODELS_ON_STARTUP",
-    "true"
+    "false"
 ).lower() in {"1", "true", "yes", "on"}
 
 PRELOAD_RAG_ON_STARTUP = os.getenv(
     "PRELOAD_RAG_ON_STARTUP",
-    "true"
+    "false"
 ).lower() in {"1", "true", "yes", "on"}
 
 REQUIRE_MODELS_ON_STARTUP = os.getenv(

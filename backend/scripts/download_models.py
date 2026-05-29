@@ -113,6 +113,11 @@ def download_model(crop: str, env_name: str, filename: str) -> dict:
     if not url:
         raise RuntimeError(f"{env_name} is not configured")
 
+    if destination.exists():
+        size = verify_model(destination)
+        logger.info("%s model already exists path=%s size_bytes=%s; skipping download", crop, destination, size)
+        return {"crop": crop, "path": str(destination), "size_bytes": size, "skipped": True}
+
     logger.info("downloading %s model", crop)
     last_error: Exception | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):

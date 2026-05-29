@@ -30,11 +30,12 @@ logger = logging.getLogger("agromind.auth.routes")
 
 
 def frontend_url() -> str:
-    return (
+    raw_url = (
         os.getenv("FRONTEND_URL")
         or os.getenv("FRONTEND_ORIGIN")
         or "https://agrowmindai.vercel.app"
-    ).rstrip("/")
+    )
+    return raw_url.split(",", 1)[0].strip().rstrip("/")
 
 
 def token_for_user(db_user: dict) -> dict:
