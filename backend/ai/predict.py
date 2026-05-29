@@ -948,17 +948,34 @@ def image_quality_score(batch: np.ndarray) -> float:
 
 
 def apply_input_scale(batch: np.ndarray, metadata: dict) -> np.ndarray:
-    input_scale = str(metadata.get("input_scale", "model_includes_preprocessing")).lower()
+    input_scale = str(
+        metadata.get("input_scale", "model_includes_preprocessing")
+    ).lower()
+
+    # 0 -> 1 normalization
     if input_scale in {"rescale_0_1", "0_1"}:
         logger.debug("Applying 0..1 input scaling")
         return batch / 255.0
-    if input_scale in {"mobilenetv2_-1_1", "rescale_-1_1", "-1_1"}:
+
+    # MobileNetV2 normalization (-1 -> 1)
+    if (
+        "mobilenetv2" in input_scale
+        or "-1_to_1" in input_scale
+        or input_scale in {
+            "mobilenetv2_-1_1",
+            "rescale_-1_1",
+            "-1_1",
+        }
+    ):
         logger.debug("Applying MobileNetV2 -1..1 input scaling")
         return (batch / 127.5) - 1.0
 
-    logger.debug("Leaving image batch unscaled because model metadata input_scale=%s", input_scale)
-    return batch
+    logger.debug(
+        "Leaving image batch unscaled because model metadata input_scale=%s",
+        input_scale,
+    )
 
+    return batch
 
 def _softmax(scores: np.ndarray) -> np.ndarray:
     values = np.asarray(scores, dtype=np.float64)
