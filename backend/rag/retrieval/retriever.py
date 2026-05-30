@@ -1,63 +1,45 @@
-from __future__ import annotations
+from functools import lru_cache
 
-import logging
-import time
-from threading import Lock
-
-from rag.config import DEFAULT_TOP_K, MIN_SIMILARITY
-from rag.embeddings.embedder import get_embedder
-from rag.vectorstore.chroma_store import get_chroma_store
-
-logger = logging.getLogger("agromind.rag.retriever")
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
 
 
-class Retriever:
-    def __init__(self):
-        self.embedder = get_embedder()
-        self.store = get_chroma_store()
+VECTORSTORE_DIR = "rag/vectorstore/faiss_md_index"
 
-    def retrieve(self, question: str, top_k: int = DEFAULT_TOP_K, min_similarity: float = MIN_SIMILARITY) -> list[dict]:
-        started_at = time.perf_counter()
-        query_embedding = self.embedder.embed_text(question)
-        matches = self.store.search(query_embedding, top_k=top_k)
-        if not matches:
-            logger.warning(
-                "RAG retrieval returned no chunks; vector store may be empty duration_ms=%.2f",
-                (time.perf_counter() - started_at) * 1000,
-            )
-            return []
 
-        strong_matches = [match for match in matches if float(match.get("score", 0)) >= min_similarity]
-        if strong_matches:
-            logger.info(
-                "RAG retrieval completed question_chars=%s returned=%s strong=%s best_score=%s duration_ms=%.2f",
-                len(question),
-                min(len(strong_matches), top_k),
-                True,
-                strong_matches[0].get("score"),
-                (time.perf_counter() - started_at) * 1000,
-            )
-            return strong_matches[:top_k]
+@lru_cache(maxsize=1)
+def get_vectorstore():
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},
+    )
 
-        logger.info(
-            "RAG retrieval below threshold; returning fallback top_k question=%s best_score=%s threshold=%s duration_ms=%.2f",
-            question[:120],
-            matches[0].get("score"),
-            min_similarity,
-            (time.perf_counter() - started_at) * 1000,
+    return FAISS.load_local(
+        VECTORSTORE_DIR,
+        embeddings,
+        allow_dangerous_deserialization=True,
+    )
+
+
+def retrieve_context(query: str, k: int = 5):
+    db = get_vectorstore()
+    docs = db.similarity_search(query, k=k)
+
+    context_parts = []
+
+    for i, doc in enumerate(docs, start=1):
+        source = doc.metadata.get("source", "unknown")
+        category = doc.metadata.get("category", "unknown")
+        file_name = doc.metadata.get("file_name", "unknown")
+
+        context_parts.append(
+            f"[Source {i}]\n"
+            f"File: {source}\n"
+            f"Category: {category}\n"
+            f"File Name: {file_name}\n"
+            f"Content:\n{doc.page_content}"
         )
-        return matches[:top_k]
 
-
-def get_retriever() -> Retriever:
-    global _retriever
-
-    if _retriever is None:
-        with _retriever_lock:
-            if _retriever is None:
-                _retriever = Retriever()
-    return _retriever
-
-
-_retriever: Retriever | None = None
-_retriever_lock = Lock()
+    context = "\n\n---\n\n".join(context_parts)
+    return context, docs

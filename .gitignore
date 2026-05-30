@@ -1,6 +1,30 @@
-# =========================
+# =========================================================
+# AgroMind AI - Git Ignore
+# =========================================================
+
+
+# =========================================================
+# Secrets / Environment files
+# =========================================================
+.env
+.env.*
+*.env
+*.local
+
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+frontend/AgrowMind Ai/.env.production
+
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
+
+# =========================================================
 # Logs
-# =========================
+# =========================================================
 logs/
 *.log
 npm-debug.log*
@@ -9,43 +33,105 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# =========================
-# Dependencies
-# =========================
+
+# =========================================================
+# Node / Frontend dependencies
+# =========================================================
 node_modules/
 frontend/node_modules/
 backend/node_modules/
 
-# =========================
-# Build folders
-# =========================
+
+# =========================================================
+# Build output folders
+# =========================================================
 dist/
 dist-ssr/
 build/
 out/
+coverage/
 
-# =========================
-# Environment files
-# =========================
-.env
-.env.local
-.env.*.local
-*.local
 
-# =========================
-# Python
-# =========================
+# =========================================================
+# Python cache / compiled files
+# =========================================================
 __pycache__/
+*/__pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.sqlite3
+.Python
+
+
+# =========================================================
+# Python virtual environments
+# =========================================================
 venv/
 .venv/
+env/
+backend/venv/
+backend/.venv/
+backend/tfenv/
 
-# =========================
-# AI / ML Models
-# =========================
+
+# =========================================================
+# Databases / local runtime files
+# =========================================================
+*.sqlite3
+*.db
+*.sqlite
+backend/*.sqlite3
+backend/*.db
+
+
+# =========================================================
+# Uploads / generated results / temp
+# =========================================================
+uploads/
+tmp/
+temp/
+backend/uploads/
+backend/results/
+backend/tmp/
+backend/temp/
+
+
+# =========================================================
+# RAG generated vector indexes
+# Commit RAG code + markdown knowledge base, but NOT generated indexes
+# =========================================================
+backend/rag/vectorstore/faiss_md_index/
+backend/rag/vectorstore/faiss_index/
+backend/rag/vectorstore/chroma/
+backend/rag/chroma_db/
+backend/vector_db/
+
+backend/rag/vectorstore/**/*.faiss
+backend/rag/vectorstore/**/*.pkl
+backend/rag/vectorstore/**/*.sqlite3
+
+!backend/vector_db/.gitkeep
+
+
+# =========================================================
+# RAG cache files
+# =========================================================
+backend/rag/**/__pycache__/
+backend/rag/**/*.pyc
+
+
+# =========================================================
+# Knowledge base files
+# Keep markdown knowledge base, ignore large PDFs
+# =========================================================
+backend/knowledge_base/**/*.pdf
+
+
+# =========================================================
+# AI / ML model artifacts
+# Ignore large model formats by default
+# =========================================================
 *.h5
 *.keras
 *.pth
@@ -54,74 +140,61 @@ venv/
 *.ckpt
 *.pb
 
-# Ignore ad hoc training outputs but allow deployed model artifacts/metadata.
+# Keep deployed TFLite models if you want them in repo.
+# If you do NOT want TFLite models in GitHub, uncomment next line:
+# backend/models/*.tflite
+
+# Training outputs
 backend/training/*
-!backend/training/*_model.keras
+
 !backend/training/*_model.json
 !backend/training/class_names/
 !backend/training/class_names/*.json
 
-# =========================
+
+# =========================================================
 # Dataset folders
-# =========================
+# =========================================================
 datasets/
 data/
+
 !backend/data/
 !backend/data/recommendations.json
 
-# =========================
-# Editor files
-# =========================
+
+# =========================================================
+# Documents / local notes / passwords
+# =========================================================
+*.docx
+*.pub
+New Text Document (2).txt
+text doc and passwords/
+
+
+# =========================================================
+# Editor / OS files
+# =========================================================
 .vscode/*
 !.vscode/extensions.json
 .idea/
 .DS_Store
+Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
-# Virtual environments
-backend/tfenv/
-venv/
-.venv/
 
-# Uploads & results
-backend/uploads/
-backend/results/
 
-# Production env
-frontend/AgrowMind Ai/.env.production
+# Ignore root accidental RAG folder
+/rag/
 
-# Documents
-*.docx
-*.pub
-# Local notes / passwords
-New Text Document (2).txt
-text doc and passwords/
-
-# Environment files
-.env
-.env.*
-# RAG files
-rag/
-!backend/rag/
-!backend/rag/**
-backend/rag/**/__pycache__/
-backend/rag/**/*.pyc
-backend/vector_db/*
-!backend/vector_db/.gitkeep
-backend/vector_db/
-backend/knowledge_base/**/*.pdf
-# AI Models
+# Ignore training model binaries
 backend/training/*.keras
+backend/training/*.h5
+backend/training/*.tflite
 
-# RAG Vector DB
-backend/rag/chroma_db/
-
-# Uploads
-backend/uploads/
-
-# Environment files
-.env
-.env.*
+# Keep only training metadata if needed
+!backend/training/*_model.json
+!backend/training/class_names/
+!backend/training/class_names/*.json

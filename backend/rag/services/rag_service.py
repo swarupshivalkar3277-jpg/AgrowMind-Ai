@@ -1,289 +1,187 @@
-from __future__ import annotations
-
-import logging
-import asyncio
-import os
-import time
-from threading import Lock
-from datetime import datetime, timezone
-
-from fastapi import HTTPException
-
-from database.mongodb import db
-from rag.embeddings.embedder import get_embedder
-from rag.retrieval.retriever import get_retriever
-from rag.services.llm_service import get_llm_service
-from rag.vectorstore.chroma_store import chroma_status, get_chroma_store
-from utils.env import env_bool
-
-logger = logging.getLogger("agromind.rag.service")
-RAG_RETRIEVAL_TIMEOUT_SECONDS = max(3, int(os.getenv("RAG_RETRIEVAL_TIMEOUT_SECONDS", "5")))
-RAG_GENERATION_TIMEOUT_SECONDS = max(5, int(os.getenv("RAG_GENERATION_TIMEOUT_SECONDS", "10")))
-RAG_TOTAL_TIMEOUT_SECONDS = max(8, int(os.getenv("RAG_TOTAL_TIMEOUT_SECONDS", "15")))
-RAG_CONCURRENCY = max(1, int(os.getenv("RAG_CONCURRENCY", "1")))
-RAG_WARMUP_TIMEOUT_SECONDS = max(15, int(os.getenv("RAG_WARMUP_TIMEOUT_SECONDS", "120")))
-RAG_COLD_START_FAST_FALLBACK = env_bool("RAG_COLD_START_FAST_FALLBACK", True)
-rag_semaphore = asyncio.Semaphore(RAG_CONCURRENCY)
-rag_warmup_task: asyncio.Task | None = None
-rag_startup_status: dict = {
-    "warmed": False,
-    "available": False,
-    "error": None,
-    "embedder_loaded": False,
-    "chroma_loaded": False,
-    "vector_documents": 0,
-    "warmup_duration_ms": None,
-}
+from rag.retrieval.retriever import retrieve_context
 
 
-def unique_sources(chunks: list[dict]) -> list[dict]:
-    seen: set[tuple[str, int]] = set()
-    sources: list[dict] = []
-    for chunk in chunks:
-        key = (chunk.get("source", ""), int(chunk.get("page", 0) or 0))
-        if key in seen:
-            continue
-        seen.add(key)
-        sources.append({"source": key[0], "page": key[1]})
-    return sources
+def build_rag_prompt(user_query: str, context: str) -> str:
+    return f"""
+You are AgroMind AI, an agriculture assistant for Indian farmers.
+
+Use ONLY the provided knowledge base context to answer the farmer's question.
+
+Rules:
+- Give practical, farmer-friendly guidance.
+- Do not invent pesticide doses, subsidy amounts, scheme deadlines, or legal rules.
+- For pesticides, always advise checking the product label and local agriculture officer guidance.
+- For fertilizers, recommend soil-test-based application.
+- For government schemes, advise checking official portal, CSC, bank, or agriculture office.
+- If context is not enough, say: "My knowledge base does not contain enough information about this."
+- Answer in the same language as the user's question when possible.
+- Include source file names at the end.
+
+KNOWLEDGE BASE CONTEXT:
+{context}
+
+FARMER QUESTION:
+{user_query}
+
+ANSWER:
+"""
 
 
-def ensure_answer_citations(answer: str, sources: list[dict]) -> str:
-    if not sources:
-        return answer
-    source_lines = [f"Source: {source['source']} page {source['page']}" for source in sources]
-    if all(line.lower() in answer.lower() for line in source_lines[:2]):
-        return answer
-    return f"{answer.rstrip()}\n\n" + "\n".join(source_lines)
+def prepare_rag_answer(user_query: str, k: int = 5):
+    context, docs = retrieve_context(user_query, k=k)
+    prompt = build_rag_prompt(user_query, context)
 
-
-class RAGService:
-    def __init__(self):
-        self.retriever = get_retriever()
-        self.llm = get_llm_service()
-
-    async def answer_question(self, question: str, user: dict | None = None, save_history: bool = True) -> dict:
-        started_at = time.perf_counter()
-        clean_question = question.strip()
-        if not clean_question:
-            raise HTTPException(status_code=400, detail="Question is required")
-
-        try:
-            if RAG_COLD_START_FAST_FALLBACK and not self.retriever.embedder.is_loaded:
-                schedule_rag_warmup()
-                return self.fallback_response(
-                    "The assistant knowledge engine is warming up. Please try again shortly. For urgent crop care, isolate affected plant parts, avoid overwatering, and follow the disease recommendation from the diagnosis result.",
-                    provider="fallback_cold_start",
-                )
-
-            async with rag_semaphore:
-                chunks = await asyncio.wait_for(
-                    asyncio.to_thread(self.retriever.retrieve, clean_question),
-                    timeout=RAG_RETRIEVAL_TIMEOUT_SECONDS,
-                )
-            sources = unique_sources(chunks)
-            if not sources:
-                return self.fallback_response(
-                    "The AgroMind knowledge index is not ready yet. I can still help with general crop safety: isolate affected leaves, avoid spraying during wind or heat, use clean tools, and confirm treatment with a local agriculture officer.",
-                    provider="fallback_empty_index",
-                )
-
-            generated = await asyncio.wait_for(
-                self.llm.generate_answer(clean_question, chunks),
-                timeout=RAG_GENERATION_TIMEOUT_SECONDS,
-            )
-            answer = ensure_answer_citations(generated["answer"], sources)
-            response = {
-                "answer": answer,
-                "sources": sources,
-                "chunks": chunks,
-                "provider": generated["provider"],
-            }
-            if save_history and user:
-                await self.save_chat(user, clean_question, response)
-            return response
-        except asyncio.TimeoutError:
-            logger.warning(
-                "RAG request timed out question_chars=%s duration_ms=%.2f",
-                len(clean_question),
-                (time.perf_counter() - started_at) * 1000,
-            )
-            return self.fallback_response(
-                "The assistant is warming up or the knowledge index is slow right now. Please try again shortly. For urgent crop care, remove badly affected leaves, avoid overwatering, and use only label-approved treatments.",
-                provider="fallback_timeout",
-            )
-        except HTTPException as exc:
-            logger.warning("RAG provider returned HTTP error status=%s detail=%s", exc.status_code, exc.detail)
-            return self.fallback_response(
-                "The assistant provider is temporarily unavailable. Please try again shortly. Use the diagnosis recommendation while the assistant recovers.",
-                provider="fallback_provider_error",
-            )
-        except Exception:
-            logger.exception("RAG request failed")
-            return self.fallback_response(
-                "The assistant is temporarily unavailable. Your prediction can still be used with the disease recommendations shown on the diagnosis page.",
-                provider="fallback_error",
-            )
-        finally:
-            logger.info("RAG request finished duration_ms=%.2f", (time.perf_counter() - started_at) * 1000)
-
-    def fallback_response(self, answer: str, provider: str) -> dict:
-        return {
-            "answer": answer,
-            "sources": [],
-            "chunks": [],
-            "provider": provider,
+    sources = [
+        {
+            "source": doc.metadata.get("source"),
+            "category": doc.metadata.get("category"),
+            "file_name": doc.metadata.get("file_name"),
         }
+        for doc in docs
+    ]
 
-    async def save_chat(self, user: dict, question: str, response: dict) -> None:
-        try:
-            await db.rag_chats.insert_one(
-                {
-                    "user_id": str(user["_id"]),
-                    "email": user.get("email"),
-                    "question": question,
-                    "answer": response["answer"],
-                    "sources": response["sources"],
-                    "provider": response.get("provider"),
-                    "created_at": datetime.now(timezone.utc),
-                }
-            )
-        except Exception:
-            logger.exception("Failed to store RAG chat history user=%s", user.get("email"))
-
-
-def get_rag_service() -> RAGService:
-    global _rag_service
-
-    if _rag_service is None:
-        with _rag_service_lock:
-            if _rag_service is None:
-                _rag_service = RAGService()
-    return _rag_service
-
-
-async def answer_question(question: str, user: dict | None = None, save_history: bool = True) -> dict:
-    try:
-        return await asyncio.wait_for(
-            get_rag_service().answer_question(question, user=user, save_history=save_history),
-            timeout=RAG_TOTAL_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError:
-        logger.warning("RAG total timeout exceeded question_chars=%s", len(question or ""))
-        return get_rag_service().fallback_response(
-            "The assistant is warming up or the knowledge index is slow right now. Please try again shortly. For urgent crop care, remove badly affected leaves, avoid overwatering, and use only label-approved treatments.",
-            provider="fallback_total_timeout",
-        )
-
-
-async def answer_disease_question(crop: str, disease: str, user: dict | None = None) -> dict:
-    readable_disease = (disease or "crop disease").replace("_", " ")
-    query = (
-        f"Explain {crop.title()} {readable_disease} including symptoms, causes, prevention, "
-        "organic treatment, chemical treatment, and farmer safety advice."
-    )
-    return await answer_question(query, user=user, save_history=False)
-
-
-async def rag_health_status() -> dict:
-    try:
-        status = await asyncio.wait_for(
-            asyncio.to_thread(chroma_status),
-            timeout=RAG_RETRIEVAL_TIMEOUT_SECONDS,
-        )
-        count = status["vector_documents"]
-        embedder = get_embedder()
-        return {
-            "success": True,
-            "ready": count > 0,
-            "vector_documents": count,
-            "embedder_loaded": embedder.is_loaded,
-            "chroma": status,
-            "startup": rag_startup_status,
-            "timeouts": {
-                "retrieval_seconds": RAG_RETRIEVAL_TIMEOUT_SECONDS,
-                "generation_seconds": RAG_GENERATION_TIMEOUT_SECONDS,
-                "total_seconds": RAG_TOTAL_TIMEOUT_SECONDS,
-                "warmup_seconds": RAG_WARMUP_TIMEOUT_SECONDS,
-            },
-            "concurrency": RAG_CONCURRENCY,
-        }
-    except Exception as exc:
-        logger.exception("RAG health check failed")
-        return {
-            "success": False,
-            "ready": False,
-            "error": type(exc).__name__,
-            "message": str(exc),
-        }
-
-
-def warmup_rag_sync() -> dict:
-    started_at = time.perf_counter()
-    status = {
-        "warmed": False,
-        "available": False,
-        "error": None,
-        "embedder_loaded": False,
-        "chroma_loaded": False,
-        "vector_documents": 0,
-        "warmup_duration_ms": None,
+    return {
+        "query": user_query,
+        "prompt": prompt,
+        "sources": sources,
     }
-    try:
-        store = get_chroma_store()
-        vector_documents = store.count_documents()
-        logger.info("RAG startup Chroma ready documents=%s", vector_documents)
 
-        embedder = get_embedder()
-        embedder.embed_text("AgroMind RAG warmup")
-        logger.info("RAG startup embedding model ready")
 
-        get_retriever()
-        status.update(
-            {
-                "warmed": True,
-                "available": vector_documents > 0,
-                "embedder_loaded": embedder.is_loaded,
-                "chroma_loaded": True,
-                "vector_documents": vector_documents,
-            }
+def simple_context_answer(user_query: str, docs) -> str:
+    """
+    Temporary fallback answer until LLM is connected.
+    This returns retrieved knowledge-base content directly.
+    """
+
+    if not docs:
+        return "My knowledge base does not contain enough information about this."
+
+    answer_parts = [
+        "Based on AgroMind knowledge base, here is the relevant guidance:\n"
+    ]
+
+    for i, doc in enumerate(docs, start=1):
+        file_name = doc.metadata.get("file_name", "unknown")
+        content = doc.page_content.strip()
+
+        answer_parts.append(
+            f"\nSource {i}: {file_name}\n"
+            f"{content[:1200]}\n"
         )
-    except Exception as exc:
-        logger.exception("RAG startup warmup failed")
-        status.update({"error": f"{type(exc).__name__}: {exc}"})
-    finally:
-        status["warmup_duration_ms"] = round((time.perf_counter() - started_at) * 1000, 2)
-        rag_startup_status.update(status)
-        logger.info("RAG startup warmup finished status=%s", status)
-    return status
+
+    source_files = sorted(
+        set(doc.metadata.get("file_name", "unknown") for doc in docs)
+    )
+
+    answer_parts.append("\nSources: " + ", ".join(source_files))
+
+    return "\n".join(answer_parts)
 
 
-async def warmup_rag() -> dict:
-    return await asyncio.wait_for(
-        asyncio.to_thread(warmup_rag_sync),
-        timeout=RAG_WARMUP_TIMEOUT_SECONDS,
+async def answer_question(
+    question: str,
+    user: dict | None = None,
+    save_history: bool = False,
+    k: int = 5,
+):
+    """
+    Async-compatible function used by rag/api/routes.py.
+    Currently returns retrieval-based answer.
+    Later this can call your real LLM using the generated prompt.
+    """
+
+    context, docs = retrieve_context(question, k=k)
+    prompt = build_rag_prompt(question, context)
+
+    sources = [
+        {
+            "source": doc.metadata.get("source"),
+            "category": doc.metadata.get("category"),
+            "file_name": doc.metadata.get("file_name"),
+        }
+        for doc in docs
+    ]
+
+    # Temporary answer without LLM.
+    # Replace this with llm_service call later.
+    answer = simple_context_answer(question, docs)
+
+    return {
+        "answer": answer,
+        "sources": sources,
+        "provider": "faiss_md_retrieval",
+        "prompt": prompt,
+    }
+async def answer_disease_question(
+    question: str,
+    crop: str | None = None,
+    disease: str | None = None,
+    user: dict | None = None,
+    save_history: bool = False,
+    k: int = 5,
+):
+    """
+    Compatibility wrapper for main.py.
+    Uses the same Markdown FAISS RAG pipeline.
+    """
+
+    final_question = question
+
+    if crop:
+        final_question = f"Crop: {crop}\n{final_question}"
+
+    if disease:
+        final_question = f"Disease/Pest/Problem: {disease}\n{final_question}"
+
+    return await answer_question(
+        final_question,
+        user=user,
+        save_history=save_history,
+        k=k,
     )
 
 
-def schedule_rag_warmup() -> None:
-    global rag_warmup_task
+def rag_health_status():
+    """
+    Compatibility health check for main.py.
+    """
 
     try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return
+        context, docs = retrieve_context("tomato fruit borer", k=1)
 
-    if rag_warmup_task and not rag_warmup_task.done():
-        return
+        return {
+            "status": "ok",
+            "provider": "faiss_md_retrieval",
+            "vectorstore": "rag/vectorstore/faiss_md_index",
+            "retrieval_test_docs": len(docs),
+        }
 
-    async def _runner() -> None:
-        try:
-            await warmup_rag()
-        except Exception:
-            logger.exception("Background RAG warmup failed")
+    except Exception as e:
+        return {
+            "status": "error",
+            "provider": "faiss_md_retrieval",
+            "error": str(e),
+        }
 
-    rag_warmup_task = loop.create_task(_runner())
 
+async def warmup_rag():
+    """
+    Compatibility warmup function for main.py.
+    Loads FAISS index and embedding model once.
+    """
 
-_rag_service: RAGService | None = None
-_rag_service_lock = Lock()
+    try:
+        context, docs = retrieve_context("tomato fruit borer", k=1)
+
+        return {
+            "status": "warmed_up",
+            "provider": "faiss_md_retrieval",
+            "docs": len(docs),
+        }
+
+    except Exception as e:
+        return {
+            "status": "warmup_failed",
+            "provider": "faiss_md_retrieval",
+            "error": str(e),
+        }
