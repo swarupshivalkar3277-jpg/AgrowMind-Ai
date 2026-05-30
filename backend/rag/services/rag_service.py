@@ -1,4 +1,20 @@
+import os
+from typing import Any
+
 from rag.retrieval.retriever import retrieve_context
+from rag.services.llm_service import generate_llm_answer
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+
+    if value is None:
+        return default
+
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+RAG_RETURN_PROMPT = _env_bool("RAG_RETURN_PROMPT", default=False)
 
 
 def build_rag_prompt(user_query: str, context: str) -> str:
@@ -15,6 +31,8 @@ Rules:
 - For government schemes, advise checking official portal, CSC, bank, or agriculture office.
 - If context is not enough, say: "My knowledge base does not contain enough information about this."
 - Answer in the same language as the user's question when possible.
+- Keep the answer clean and structured.
+- Do not mention internal chunk numbers.
 - Include source file names at the end.
 
 KNOWLEDGE BASE CONTEXT:
@@ -27,32 +45,34 @@ ANSWER:
 """
 
 
-def prepare_rag_answer(user_query: str, k: int = 5):
-    context, docs = retrieve_context(user_query, k=k)
-    prompt = build_rag_prompt(user_query, context)
+def _dedupe_sources(docs) -> list[dict[str, Any]]:
+    seen = set()
+    sources = []
 
-    sources = [
-        {
-            "source": doc.metadata.get("source"),
-            "category": doc.metadata.get("category"),
-            "file_name": doc.metadata.get("file_name"),
-        }
-        for doc in docs
-    ]
+    for doc in docs:
+        source = doc.metadata.get("source")
+        category = doc.metadata.get("category")
+        file_name = doc.metadata.get("file_name")
 
-    return {
-        "query": user_query,
-        "prompt": prompt,
-        "sources": sources,
-    }
+        key = (source, category, file_name)
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+
+        sources.append(
+            {
+                "source": source,
+                "category": category,
+                "file_name": file_name,
+            }
+        )
+
+    return sources
 
 
 def simple_context_answer(user_query: str, docs) -> str:
-    """
-    Temporary fallback answer until LLM is connected.
-    This returns retrieved knowledge-base content directly.
-    """
-
     if not docs:
         return "My knowledge base does not contain enough information about this."
 
@@ -78,40 +98,48 @@ def simple_context_answer(user_query: str, docs) -> str:
     return "\n".join(answer_parts)
 
 
+def prepare_rag_answer(user_query: str, k: int = 5):
+    context, docs = retrieve_context(user_query, k=k)
+    prompt = build_rag_prompt(user_query, context)
+
+    return {
+        "query": user_query,
+        "prompt": prompt,
+        "sources": _dedupe_sources(docs),
+    }
+
+
 async def answer_question(
     question: str,
     user: dict | None = None,
     save_history: bool = False,
     k: int = 5,
 ):
-    """
-    Async-compatible function used by rag/api/routes.py.
-    Currently returns retrieval-based answer.
-    Later this can call your real LLM using the generated prompt.
-    """
-
     context, docs = retrieve_context(question, k=k)
     prompt = build_rag_prompt(question, context)
+    sources = _dedupe_sources(docs)
 
-    sources = [
-        {
-            "source": doc.metadata.get("source"),
-            "category": doc.metadata.get("category"),
-            "file_name": doc.metadata.get("file_name"),
+    llm_answer = await generate_llm_answer(prompt)
+
+    if llm_answer:
+        result = {
+            "answer": llm_answer,
+            "sources": sources,
+            "provider": "faiss_md_retrieval+llm",
         }
-        for doc in docs
-    ]
+    else:
+        result = {
+            "answer": simple_context_answer(question, docs),
+            "sources": sources,
+            "provider": "faiss_md_retrieval_fallback",
+        }
 
-    # Temporary answer without LLM.
-    # Replace this with llm_service call later.
-    answer = simple_context_answer(question, docs)
+    if RAG_RETURN_PROMPT:
+        result["prompt"] = prompt
 
-    return {
-        "answer": answer,
-        "sources": sources,
-        "provider": "faiss_md_retrieval",
-        "prompt": prompt,
-    }
+    return result
+
+
 async def answer_disease_question(
     question: str,
     crop: str | None = None,
@@ -120,11 +148,6 @@ async def answer_disease_question(
     save_history: bool = False,
     k: int = 5,
 ):
-    """
-    Compatibility wrapper for main.py.
-    Uses the same Markdown FAISS RAG pipeline.
-    """
-
     final_question = question
 
     if crop:
@@ -142,10 +165,6 @@ async def answer_disease_question(
 
 
 def rag_health_status():
-    """
-    Compatibility health check for main.py.
-    """
-
     try:
         context, docs = retrieve_context("tomato fruit borer", k=1)
 
@@ -154,6 +173,8 @@ def rag_health_status():
             "provider": "faiss_md_retrieval",
             "vectorstore": "rag/vectorstore/faiss_md_index",
             "retrieval_test_docs": len(docs),
+            "llm_enabled": os.getenv("LLM_ENABLED", "false"),
+            "llm_model": os.getenv("LLM_MODEL", ""),
         }
 
     except Exception as e:
@@ -165,11 +186,6 @@ def rag_health_status():
 
 
 async def warmup_rag():
-    """
-    Compatibility warmup function for main.py.
-    Loads FAISS index and embedding model once.
-    """
-
     try:
         context, docs = retrieve_context("tomato fruit borer", k=1)
 
