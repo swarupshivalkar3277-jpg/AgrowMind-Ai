@@ -1,9 +1,10 @@
-# AgroMind AI backend runtime dependencies for Render Python 3.12/3.13.
-# Keep this file focused on direct app dependencies plus compatibility
-# constraints for the TensorFlow/RAG/YOLO stack. Avoid freezing every
-# transitive dependency, because stale transitive pins can break Render builds.
+# AgroMind AI backend runtime dependencies for Render Python 3.12.
+# Keep this file focused on direct app dependencies.
+# Avoid duplicate packages and avoid freezing every transitive dependency.
 
+# =========================
 # API
+# =========================
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic[email]==2.10.4
@@ -12,7 +13,9 @@ python-dotenv==1.0.1
 httpx==0.28.1
 requests==2.32.3
 
-# Database and auth
+# =========================
+# Database and Auth
+# =========================
 motor==3.6.0
 pymongo==4.9.2
 dnspython==2.7.0
@@ -21,21 +24,47 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 
-# LiteRT disease prediction inference
-ai-edge-litert==2.1.5
-numpy==1.26.4; python_version < "3.13"
-numpy==2.2.6; python_version >= "3.13"
+# =========================
+# Core Scientific / Image
+# =========================
+numpy==1.26.4
 pillow==10.4.0
 psutil==6.1.1
 
-# YOLO detection
+# =========================
+# LiteRT Disease Prediction
+# =========================
+ai-edge-litert==2.1.5
+
+# =========================
+# YOLO Detection
+# =========================
 ultralytics==8.3.50
 opencv-python-headless==4.10.0.84
 
-# RAG assistant
-chromadb==0.5.23
+# =========================
+# RAG / LangChain / Embeddings
+# =========================
+langchain==0.3.14
+langchain-core==0.3.29
+langchain-community==0.3.14
+langchain-text-splitters==0.3.5
 sentence-transformers==3.3.1
+faiss-cpu==1.9.0.post1
+
+# =========================
+# Document Loaders
+# =========================
 pymupdf==1.25.1
 pypdf==5.1.0
 
+# =========================
+# Optional Vector Store
+# Keep because your older code has Chroma files.
+# =========================
+chromadb==0.5.23
+
+# =========================
+# ONNX Runtime
+# =========================
 onnxruntime==1.20.1
