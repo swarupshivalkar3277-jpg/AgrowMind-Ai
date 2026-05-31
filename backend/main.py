@@ -49,11 +49,15 @@ from auth.otp import email_config_status
 from routes.admin import router as admin_router
 from routes.marketplace import (
     router as marketplace_router,
-    recommended_products
+    recommended_products,
 )
 
 from rag.api.routes import router as rag_router
-from rag.services.rag_service import answer_disease_question, rag_health_status, warmup_rag
+from rag.services.rag_service import (
+    answer_disease_question,
+    rag_health_status,
+    warmup_rag,
+)
 
 # =========================
 # AI
@@ -97,49 +101,52 @@ logger = logging.getLogger("agromind.api")
 # =========================
 PREDICTION_CONCURRENCY = max(
     1,
-    int(os.getenv("PREDICTION_CONCURRENCY", "1"))
+    int(os.getenv("PREDICTION_CONCURRENCY", "1")),
 )
 
 PREDICTION_TIMEOUT_SECONDS = max(
     30,
-    int(os.getenv("PREDICTION_TIMEOUT_SECONDS", "75"))
+    int(os.getenv("PREDICTION_TIMEOUT_SECONDS", "75")),
 )
 
 MODEL_PRELOAD_TIMEOUT_SECONDS = max(
     60,
-    int(os.getenv("MODEL_PRELOAD_TIMEOUT_SECONDS", "240"))
+    int(os.getenv("MODEL_PRELOAD_TIMEOUT_SECONDS", "240")),
 )
 
+# Keep model preload default true locally, but this now runs in background.
 PRELOAD_MODELS_ON_STARTUP = env_bool("PRELOAD_MODELS_ON_STARTUP", True)
 
-PRELOAD_RAG_ON_STARTUP = env_bool("PRELOAD_RAG_ON_STARTUP")
+# Important Render fix: RAG warmup default must be false.
+PRELOAD_RAG_ON_STARTUP = env_bool("PRELOAD_RAG_ON_STARTUP", False)
 
-ENABLE_RAG_GUIDANCE_ON_PREDICTION = env_bool("ENABLE_RAG_GUIDANCE_ON_PREDICTION")
+# Keep prediction RAG guidance disabled by default to avoid slow prediction requests.
+ENABLE_RAG_GUIDANCE_ON_PREDICTION = env_bool(
+    "ENABLE_RAG_GUIDANCE_ON_PREDICTION",
+    False,
+)
 
 RAG_PREDICTION_TIMEOUT_SECONDS = max(
     2,
-    int(os.getenv("RAG_PREDICTION_TIMEOUT_SECONDS", "4"))
+    int(os.getenv("RAG_PREDICTION_TIMEOUT_SECONDS", "4")),
 )
 
 MAX_UPLOAD_BYTES = max(
     512 * 1024,
-    int(os.getenv("MAX_UPLOAD_BYTES", str(8 * 1024 * 1024)))
+    int(os.getenv("MAX_UPLOAD_BYTES", str(8 * 1024 * 1024))),
 )
 
 UPLOAD_CHUNK_BYTES = max(
     64 * 1024,
-    int(os.getenv("UPLOAD_CHUNK_BYTES", str(1024 * 1024)))
+    int(os.getenv("UPLOAD_CHUNK_BYTES", str(1024 * 1024))),
 )
-
 
 UPLOAD_CLEANUP_MAX_AGE_SECONDS = max(
     300,
-    int(os.getenv("UPLOAD_CLEANUP_MAX_AGE_SECONDS", "1800"))
+    int(os.getenv("UPLOAD_CLEANUP_MAX_AGE_SECONDS", "1800")),
 )
 
-prediction_semaphore = asyncio.Semaphore(
-    PREDICTION_CONCURRENCY
-)
+prediction_semaphore = asyncio.Semaphore(PREDICTION_CONCURRENCY)
 
 # =========================
 # REQUIRED ENV
@@ -195,7 +202,7 @@ def _csv_env(name: str) -> list[str]:
 
 ENVIRONMENT = os.getenv(
     "ENVIRONMENT",
-    os.getenv("ENV", "development")
+    os.getenv("ENV", "development"),
 ).lower()
 
 PRODUCTION_FRONTEND_ORIGINS = [
@@ -270,6 +277,93 @@ app.add_middleware(
 )
 
 # =========================
+# PATHS
+# =========================
+BASE_DIR = Path(__file__).resolve().parent
+
+UPLOAD_FOLDER = BASE_DIR / "uploads"
+RESULTS_FOLDER = BASE_DIR / "results"
+
+UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
+RESULTS_FOLDER.mkdir(parents=True, exist_ok=True)
+
+app.mount(
+    "/results",
+    StaticFiles(directory=str(RESULTS_FOLDER)),
+    name="results",
+)
+
+# =========================
+# CROPS
+# =========================
+SUPPORTED_CROPS = {
+    "tomato",
+    "mango",
+    "coconut",
+}
+
+# =========================
+# BACKGROUND WARMUP TASKS
+# =========================
+async def background_model_warmup():
+    """
+    Render-safe model warmup.
+
+    This runs after startup is complete, so Uvicorn can bind to PORT quickly.
+    """
+    if not PRELOAD_MODELS_ON_STARTUP:
+        logger.warning("Model startup preload disabled by PRELOAD_MODELS_ON_STARTUP=false")
+        return
+
+    try:
+        logger.info("Background model preload begin")
+
+        preload_result = await asyncio.wait_for(
+            asyncio.to_thread(preload_all_models, False),
+            timeout=MODEL_PRELOAD_TIMEOUT_SECONDS,
+        )
+        logger.info("Background model preload complete result=%s", preload_result)
+
+        warmup_result = await asyncio.wait_for(
+            asyncio.to_thread(warm_prediction_pipeline),
+            timeout=max(30, MODEL_PRELOAD_TIMEOUT_SECONDS // 2),
+        )
+        logger.info("Background prediction pipeline warmup complete result=%s", warmup_result)
+
+    except asyncio.TimeoutError:
+        logger.exception(
+            "Background model preload timed out timeout_seconds=%s",
+            MODEL_PRELOAD_TIMEOUT_SECONDS,
+        )
+        logger.warning("Continuing with lazy model loading")
+
+    except Exception:
+        logger.exception("Background model preload failed")
+
+
+async def background_rag_warmup():
+    """
+    Optional Render-safe RAG warmup.
+
+    Disabled by default. RAG can lazy-load on first /rag/query request.
+    """
+    if not PRELOAD_RAG_ON_STARTUP:
+        logger.warning("RAG startup warmup disabled by PRELOAD_RAG_ON_STARTUP=false")
+        return
+
+    try:
+        logger.info("Background RAG startup warmup enabled")
+        rag_warmup_result = await warmup_rag()
+        logger.info("Background RAG startup warmup complete result=%s", rag_warmup_result)
+
+    except asyncio.TimeoutError:
+        logger.warning("Background RAG startup warmup timed out; RAG will lazy-load later")
+
+    except Exception:
+        logger.exception("Background RAG startup warmup failed; RAG fallback remains available")
+
+
+# =========================
 # SECURITY HEADERS
 # =========================
 @app.middleware("http")
@@ -288,24 +382,13 @@ async def security_headers(request: Request, call_next):
 # =========================
 @app.on_event("startup")
 async def startup_event():
-
     startup_started_at = time.perf_counter()
 
     logger.info("startup begin")
-
     memory_snapshot("startup_begin")
-
     logger.info("Starting AgroMind AI backend")
-
-    logger.info(
-        "PORT=%s",
-        os.getenv("PORT", "8000")
-    )
-
-    logger.info(
-        "Allowed origins=%s",
-        ALLOWED_ORIGINS
-    )
+    logger.info("PORT=%s", os.getenv("PORT", "8000"))
+    logger.info("Allowed origins=%s", ALLOWED_ORIGINS)
 
     logger.info(
         "ENABLE_RUNTIME_MODEL_DOWNLOAD=%s",
@@ -314,13 +397,19 @@ async def startup_event():
 
     logger.info(
         "Parsed runtime model download=%s",
-        env_bool("ENABLE_RUNTIME_MODEL_DOWNLOAD"),
+        env_bool("ENABLE_RUNTIME_MODEL_DOWNLOAD", False),
+    )
+
+    logger.info("PRELOAD_MODELS_ON_STARTUP=%s", PRELOAD_MODELS_ON_STARTUP)
+    logger.info("PRELOAD_RAG_ON_STARTUP=%s", PRELOAD_RAG_ON_STARTUP)
+    logger.info(
+        "ENABLE_RAG_GUIDANCE_ON_PREDICTION=%s",
+        ENABLE_RAG_GUIDANCE_ON_PREDICTION,
     )
 
     missing_env = missing_required_env_vars()
 
     if missing_env:
-
         message = (
             f"Missing required environment variables: "
             f"{', '.join(missing_env)}"
@@ -331,70 +420,30 @@ async def startup_event():
 
         logger.warning(message)
 
-    # FAST DATABASE STARTUP
+    # Keep database startup awaited because app needs DB indexes.
     try:
         await ensure_indexes()
-
-        logger.info(
-            "MongoDB connected and indexes initialized"
-        )
+        logger.info("MongoDB connected and indexes initialized")
 
     except Exception as e:
-        logger.exception(
-            "Database startup warning: %s",
-            str(e)
-        )
+        logger.exception("Database startup warning: %s", str(e))
 
-    model_artifacts = ensure_configured_models()
-    logger.info("Model artifact startup status=%s", model_artifacts)
+    try:
+        model_artifacts = ensure_configured_models()
+        logger.info("Model artifact startup status=%s", model_artifacts)
+    except Exception:
+        logger.exception("Model artifact check failed")
 
-    if PRELOAD_MODELS_ON_STARTUP:
-        try:
-            preload_result = await asyncio.wait_for(
-                asyncio.to_thread(
-                    preload_all_models,
-                    False
-                ),
-                timeout=MODEL_PRELOAD_TIMEOUT_SECONDS,
-            )
-            logger.info("Model preload complete result=%s", preload_result)
+    # IMPORTANT RENDER FIX:
+    # Do not await heavy model or RAG warmup here.
+    # Start them in background so the web port opens quickly.
+    asyncio.create_task(background_model_warmup())
+    asyncio.create_task(background_rag_warmup())
 
-            warmup_result = await asyncio.wait_for(
-                asyncio.to_thread(warm_prediction_pipeline),
-                timeout=max(30, MODEL_PRELOAD_TIMEOUT_SECONDS // 2),
-            )
-            logger.info("Prediction pipeline warmup complete result=%s", warmup_result)
-
-        except asyncio.TimeoutError:
-            logger.exception("Model preload timed out timeout_seconds=%s", MODEL_PRELOAD_TIMEOUT_SECONDS)
-            logger.warning("Continuing startup with any models already loaded")
-
-        except Exception:
-            logger.exception("Model preload failed")
-    else:
-        logger.warning("Model startup preload disabled by PRELOAD_MODELS_ON_STARTUP=false")
-
-    memory_snapshot("startup_after_model_preload")
-
-    if PRELOAD_RAG_ON_STARTUP:
-        try:
-            rag_warmup_result = await warmup_rag()
-            logger.info("RAG startup warmup complete result=%s", rag_warmup_result)
-        except asyncio.TimeoutError:
-            logger.warning("RAG startup warmup timed out; assistant will use fallback until ready")
-        except Exception:
-            logger.exception("RAG startup warmup failed; assistant fallback remains available")
-    else:
-        logger.warning("RAG startup warmup disabled by PRELOAD_RAG_ON_STARTUP=false")
-
-    memory_snapshot("startup_after_rag_warmup")
+    memory_snapshot("startup_background_tasks_scheduled")
 
     total_seconds = time.perf_counter() - startup_started_at
-
-    logger.info(
-        "startup complete in %.2f seconds",
-        total_seconds
-    )
+    logger.info("startup complete in %.2f seconds", total_seconds)
 
     asyncio.create_task(cleanup_uploads_loop())
 
@@ -403,33 +452,17 @@ async def startup_event():
 # CLEANUP TASK
 # =========================
 async def cleanup_uploads_loop():
-
     while True:
-
         try:
-            cutoff = (
-                time.time()
-                - UPLOAD_CLEANUP_MAX_AGE_SECONDS
-            )
+            cutoff = time.time() - UPLOAD_CLEANUP_MAX_AGE_SECONDS
 
             for path in UPLOAD_FOLDER.glob("*"):
-
-                if (
-                    path.is_file()
-                    and path.stat().st_mtime < cutoff
-                ):
+                if path.is_file() and path.stat().st_mtime < cutoff:
                     path.unlink(missing_ok=True)
-
-                    logger.info(
-                        "Cleaned old upload=%s",
-                        path
-                    )
+                    logger.info("Cleaned old upload=%s", path)
 
         except Exception:
-            logger.warning(
-                "Upload cleanup failed",
-                exc_info=True
-            )
+            logger.warning("Upload cleanup failed", exc_info=True)
 
         memory_snapshot("cleanup_loop")
 
@@ -441,10 +474,9 @@ async def cleanup_uploads_loop():
 # =========================
 @app.options("/{full_path:path}", include_in_schema=False)
 async def preflight_handler(full_path: str):
-
     return JSONResponse(
         status_code=200,
-        content={"ok": True}
+        content={"ok": True},
     )
 
 
@@ -454,7 +486,7 @@ async def preflight_handler(full_path: str):
 app.include_router(
     auth_router,
     prefix="/auth",
-    tags=["Authentication"]
+    tags=["Authentication"],
 )
 
 app.include_router(marketplace_router)
@@ -462,80 +494,53 @@ app.include_router(admin_router)
 app.include_router(rag_router)
 
 # =========================
-# PATHS
-# =========================
-BASE_DIR = Path(__file__).resolve().parent
-
-UPLOAD_FOLDER = BASE_DIR / "uploads"
-RESULTS_FOLDER = BASE_DIR / "results"
-
-UPLOAD_FOLDER.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-RESULTS_FOLDER.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-app.mount(
-    "/results",
-    StaticFiles(directory=str(RESULTS_FOLDER)),
-    name="results"
-)
-
-# =========================
-# CROPS
-# =========================
-SUPPORTED_CROPS = {
-    "tomato",
-    "mango",
-    "coconut",
-}
-
-# =========================
 # HELPERS
 # =========================
 async def save_upload(file: UploadFile) -> str:
-
     if not file.filename:
         raise HTTPException(
             status_code=400,
-            detail="No file uploaded"
+            detail="No file uploaded",
         )
 
     content_type = (file.content_type or "").lower()
     if content_type and not content_type.startswith("image/"):
         raise HTTPException(
             status_code=415,
-            detail="Only image uploads are supported"
+            detail="Only image uploads are supported",
         )
 
     suffix = Path(file.filename).suffix.lower() or ".jpg"
     if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
         raise HTTPException(
             status_code=400,
-            detail="Unsupported image format. Use JPG, PNG, or WebP."
+            detail="Unsupported image format. Use JPG, PNG, or WebP.",
         )
 
     filename = f"{uuid4().hex}{suffix}"
-
     file_path = UPLOAD_FOLDER / filename
 
     try:
         total_bytes = 0
+
         with open(file_path, "wb") as buffer:
             while True:
                 chunk = await file.read(UPLOAD_CHUNK_BYTES)
+
                 if not chunk:
                     break
+
                 total_bytes += len(chunk)
+
                 if total_bytes > MAX_UPLOAD_BYTES:
                     raise HTTPException(
                         status_code=413,
-                        detail=f"Image is too large. Maximum allowed size is {MAX_UPLOAD_BYTES // 1024 // 1024} MB."
+                        detail=(
+                            f"Image is too large. Maximum allowed size is "
+                            f"{MAX_UPLOAD_BYTES // 1024 // 1024} MB."
+                        ),
                     )
+
                 buffer.write(chunk)
 
         return str(file_path)
@@ -545,28 +550,31 @@ async def save_upload(file: UploadFile) -> str:
             file_path.unlink(missing_ok=True)
         raise
 
-    except Exception as e:
-        logger.exception("Upload failed filename=%s content_type=%s", file.filename, file.content_type)
+    except Exception:
+        logger.exception(
+            "Upload failed filename=%s content_type=%s",
+            file.filename,
+            file.content_type,
+        )
 
         raise HTTPException(
             status_code=500,
-            detail="Upload failed"
+            detail="Upload failed",
         )
+
     finally:
         with contextlib.suppress(Exception):
             await file.close()
 
 
 def validate_crop(crop: str):
-
     if crop not in SUPPORTED_CROPS:
-
         raise HTTPException(
             status_code=400,
             detail={
                 "error": "Invalid crop",
-                "supported_crops": sorted(SUPPORTED_CROPS)
-            }
+                "supported_crops": sorted(SUPPORTED_CROPS),
+            },
         )
 
 
@@ -576,9 +584,8 @@ def validate_crop(crop: str):
 @app.exception_handler(HTTPException)
 async def http_exception_handler(
     request: Request,
-    exc: HTTPException
+    exc: HTTPException,
 ):
-
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -591,9 +598,8 @@ async def http_exception_handler(
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
     request: Request,
-    exc: RequestValidationError
+    exc: RequestValidationError,
 ):
-
     logger.warning(
         "Validation error path=%s errors=%s",
         request.url.path,
@@ -612,32 +618,31 @@ async def validation_exception_handler(
 @app.exception_handler(Exception)
 async def global_exception_handler(
     request: Request,
-    exc: Exception
+    exc: Exception,
 ):
-
     logger.exception(
         "Unhandled exception path=%s",
-        request.url.path
+        request.url.path,
     )
 
     return JSONResponse(
         status_code=500,
         content={
             "success": False,
-            "error": "Internal server error"
-        }
+            "error": "Internal server error",
+        },
     )
+
 
 # =========================
 # ROOT
 # =========================
 @app.get("/", tags=["System"])
 async def home():
-
     return {
         "success": True,
         "message": "AgroMind AI Backend Running",
-        "supported_crops": sorted(SUPPORTED_CROPS)
+        "supported_crops": sorted(SUPPORTED_CROPS),
     }
 
 
@@ -646,26 +651,17 @@ async def home():
 # =========================
 @app.get("/health", tags=["System"])
 async def health():
-
     models = model_status()
-
     database_status = "connected"
-
     database_details = mongodb_status()
-
     missing_env = missing_required_env_vars()
 
     try:
         await check_database()
 
     except Exception as exc:
-
-        logger.exception(
-            "Health database check failed"
-        )
-
+        logger.exception("Health database check failed")
         database_status = "unreachable"
-
         database_details["reason"] = str(exc)
 
     return {
@@ -683,6 +679,7 @@ async def health():
 @app.get("/health/models", tags=["System"])
 async def health_models():
     runtime = model_loaded_status()
+
     return {
         "success": True,
         "artifacts": model_status(),
@@ -698,15 +695,19 @@ async def health_models():
 @app.get("/health/database", tags=["System"])
 async def health_database():
     details = mongodb_status()
+
     try:
         await check_database()
+
         return {
             "success": True,
             "status": "connected",
             "details": details,
         }
+
     except Exception as exc:
         logger.exception("Database health failed")
+
         return JSONResponse(
             status_code=503,
             content={
@@ -719,9 +720,20 @@ async def health_database():
 
 @app.get("/health/rag", tags=["System"])
 async def health_rag():
-    status_payload = await rag_health_status()
-    status_code = 200 if status_payload.get("ready") else 503
-    return JSONResponse(status_code=status_code, content=status_payload)
+    # rag_health_status is sync in current rag_service.py.
+    status_payload = rag_health_status()
+
+    ready = (
+        status_payload.get("status") == "ok"
+        or status_payload.get("ready") is True
+    )
+
+    status_code = 200 if ready else 503
+
+    return JSONResponse(
+        status_code=status_code,
+        content=status_payload,
+    )
 
 
 @app.get("/ready", tags=["System"])
@@ -731,14 +743,17 @@ async def readiness():
 
     database_ok = True
     database_error = None
+
     try:
         await check_database()
+
     except Exception as exc:
         database_ok = False
         database_error = str(exc)
 
     ready = database_ok
     status_code = 200 if ready else 503
+
     return JSONResponse(
         status_code=status_code,
         content={
@@ -758,16 +773,12 @@ async def readiness():
 # =========================
 @app.post("/detect", tags=["AI"])
 async def detect(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
 ):
-
     file_path = await save_upload(file)
 
     try:
-
-        detections, result_image = detect_objects(
-            file_path
-        )
+        detections, result_image = detect_objects(file_path)
 
         return {
             "success": True,
@@ -777,14 +788,11 @@ async def detect(
         }
 
     except Exception:
-
-        logger.exception(
-            "Detection failed"
-        )
+        logger.exception("Detection failed")
 
         raise HTTPException(
             status_code=503,
-            detail="Detection failed"
+            detail="Detection failed",
         )
 
 
@@ -795,54 +803,52 @@ async def detect(
 async def predict_crop(
     crop: str,
     file: UploadFile = File(...),
-    user=Depends(get_current_user)
+    user=Depends(get_current_user),
 ):
-
     validate_crop(crop)
 
     file_path = await save_upload(file)
-
     started_at = time.perf_counter()
 
     try:
-
         logger.info(
             "Prediction crop=%s user=%s",
             crop,
-            user.get("email")
+            user.get("email"),
         )
 
         async with prediction_semaphore:
-
             result = await asyncio.wait_for(
                 asyncio.to_thread(
                     predict_image,
                     file_path,
-                    crop
+                    crop,
                 ),
                 timeout=PREDICTION_TIMEOUT_SECONDS,
             )
 
         if "error" in result:
-
             raise HTTPException(
                 status_code=503,
-                detail=result
+                detail=result,
             )
 
-        result = enrich_prediction(
-            crop,
-            result
-        )
+        result = enrich_prediction(crop, result)
+
+        disease = result.get("disease", "")
 
         try:
             market_products = await recommended_products(
                 crop,
-                result.get("disease", ""),
-                limit=6
+                disease,
+                limit=6,
             )
         except Exception:
-            logger.exception("Marketplace recommendation lookup failed crop=%s disease=%s", crop, result.get("disease", ""))
+            logger.exception(
+                "Marketplace recommendation lookup failed crop=%s disease=%s",
+                crop,
+                disease,
+            )
             market_products = []
 
         result["marketplace_products"] = market_products
@@ -850,12 +856,19 @@ async def predict_crop(
         # OPTIONAL RAG
         if ENABLE_RAG_GUIDANCE_ON_PREDICTION:
             try:
+                rag_question = (
+                    f"How should a farmer manage {disease} in {crop}?"
+                    if disease
+                    else f"How should a farmer manage this problem in {crop}?"
+                )
 
                 rag_guidance = await asyncio.wait_for(
                     answer_disease_question(
-                        crop,
-                        result.get("disease", ""),
-                        user=user
+                        rag_question,
+                        crop=crop,
+                        disease=disease,
+                        user=user,
+                        save_history=False,
                     ),
                     timeout=RAG_PREDICTION_TIMEOUT_SECONDS,
                 )
@@ -863,12 +876,13 @@ async def predict_crop(
                 result["rag_guidance"] = rag_guidance
 
             except Exception:
+                logger.exception("RAG guidance failed")
 
-                logger.exception(
-                    "RAG guidance failed"
-                )
                 result["rag_guidance"] = {
-                    "answer": "Assistant guidance is temporarily unavailable. Use the disease recommendation shown with this prediction.",
+                    "answer": (
+                        "Assistant guidance is temporarily unavailable. "
+                        "Use the disease recommendation shown with this prediction."
+                    ),
                     "sources": [],
                     "provider": "prediction_fallback",
                 }
@@ -885,63 +899,58 @@ async def predict_crop(
                 "email": user["email"],
                 "crop": crop,
                 "prediction": result,
-                "created_at": datetime.now(timezone.utc)
+                "created_at": datetime.now(timezone.utc),
             })
             result["history_saved"] = True
+
         except PyMongoError:
-            logger.exception("Prediction history insert failed user=%s crop=%s", user.get("email"), crop)
+            logger.exception(
+                "Prediction history insert failed user=%s crop=%s",
+                user.get("email"),
+                crop,
+            )
             result["history_saved"] = False
 
         return {
             "success": True,
             "crop": crop,
             "prediction": result,
-            "user": user["email"]
+            "user": user["email"],
         }
 
     except asyncio.TimeoutError:
-
         raise HTTPException(
             status_code=504,
-            detail="Prediction timed out"
+            detail="Prediction timed out",
         )
 
     except PyMongoError:
-
         raise HTTPException(
             status_code=503,
-            detail="Database unavailable"
+            detail="Database unavailable",
         )
 
     except HTTPException:
         raise
 
     except Exception:
-
-        logger.exception(
-            "Prediction failed"
-        )
+        logger.exception("Prediction failed")
 
         raise HTTPException(
             status_code=500,
-            detail="Prediction failed"
+            detail="Prediction failed",
         )
 
     finally:
-
         try:
-            Path(file_path).unlink(
-                missing_ok=True
-            )
+            Path(file_path).unlink(missing_ok=True)
 
         except Exception:
-            logger.warning(
-                "Failed deleting temp upload"
-            )
+            logger.warning("Failed deleting temp upload")
 
         logger.info(
             "Prediction completed in %.2f ms",
-            (time.perf_counter() - started_at) * 1000
+            (time.perf_counter() - started_at) * 1000,
         )
 
 
@@ -950,12 +959,11 @@ async def predict_crop(
 # =========================
 @app.get("/profile", tags=["User"])
 async def profile(
-    user=Depends(get_current_user)
+    user=Depends(get_current_user),
 ):
-
     return {
         "success": True,
-        "user": user_public(user)
+        "user": user_public(user),
     }
 
 
@@ -965,18 +973,17 @@ async def profile(
 @app.get("/history", tags=["User"])
 async def history(
     limit: int = 20,
-    user=Depends(get_current_user)
+    user=Depends(get_current_user),
 ):
-
     safe_limit = max(
         1,
-        min(limit, 100)
+        min(limit, 100),
     )
 
     cursor = (
         db.prediction_history
         .find({
-            "user_id": str(user["_id"])
+            "user_id": str(user["_id"]),
         })
         .sort("created_at", -1)
         .limit(safe_limit)
@@ -985,7 +992,6 @@ async def history(
     items = []
 
     async for item in cursor:
-
         items.append({
             "id": str(item["_id"]),
             "crop": item.get("crop"),
@@ -1003,12 +1009,11 @@ async def history(
 # MAIN
 # =========================
 if __name__ == "__main__":
-
     import uvicorn
 
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8000")),
-        reload=False
+        reload=False,
     )
